@@ -127,8 +127,24 @@ describe("Core", function()
 		ns = mock.loadAddon(".")
 		assert.equal("", macro(ns.poisonButton))
 		assert.equal("", macro(ns.fishButton))
-		assert.equal("Loading", ns.selftest.poison.label)
+		assert.equal("Waiting", ns.selftest.poison.label)
 		assert.is_false(ns.poisonButton.glow:IsShown())
+	end)
+
+	it("still fishes when only the off hand's info is not loaded", function()
+		mock.equipped = { [16] = MH, [17] = 999 }
+		mock.bag(POLE, LURE)
+		ns = mock.loadAddon(".")
+		assert.equal("/equip Fishing Pole", macro(ns.fishButton))
+		assert.equal("", macro(ns.poisonButton))
+	end)
+
+	it("says the game hides a secret equipped item instead of 'loading'", function()
+		mock.equipped = { [16] = MH, [17] = OH }
+		mock.secret[MH] = true
+		ns = mock.loadAddon(".")
+		assert.matches("hides", ns.selftest.fish.reason)
+		assert.equal("secret", ns.selftest.hands.mainHand)
 	end)
 
 	it("remembers the equipped weapons", function()

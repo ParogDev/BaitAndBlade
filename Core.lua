@@ -125,7 +125,7 @@ local function equipped(slot)
 		return nil, "empty"
 	end
 	if issecretvalue(id) then
-		return nil, "unknown"
+		return nil, "secret"
 	end
 	local item = describe(id)
 	if not item then
@@ -186,7 +186,17 @@ function ns.gather()
 	local items = ns.bagItems()
 	local mh, mhState = equipped(SLOT_MH)
 	local oh, ohState = equipped(SLOT_OH)
-	local unknown = mhState == "unknown" or ohState == "unknown"
+	-- "not now" reasons: fishing only reads the main hand, the poison button both hands
+	local function why(state)
+		if state == "secret" then
+			return "not now: the game hides your equipped items here"
+		elseif state == "unknown" then
+			return "equipped item info not loaded yet"
+		end
+	end
+	local fishUnknown = why(mhState)
+	local unknown = fishUnknown or why(ohState)
+	selftest.hands = { mainHand = mhState, offHand = ohState }
 	local mhSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand or 0
 	local ohSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.OffHand or 1
 	selftest.enchants = {}
@@ -213,7 +223,7 @@ function ns.gather()
 	end
 	local poleEquipped = mh ~= nil and Logic.isPole(mh)
 	local fish = {
-		unknown = unknown,
+		unknown = fishUnknown,
 		poleEquipped = poleEquipped,
 		lure = poleEquipped and mhEnchant, -- nil (hidden) stays nil
 		pole = Logic.bestPole(items),
@@ -455,8 +465,8 @@ end
 function ns.rememberWeapons()
 	local mh, mhState = equipped(SLOT_MH)
 	local oh, ohState = equipped(SLOT_OH)
-	if mhState == "unknown" or ohState == "unknown" then
-		say("your weapons' item info is not loaded yet: try again in a moment.")
+	if mhState == "unknown" or ohState == "unknown" or mhState == "secret" or ohState == "secret" then
+		say("can't read your weapons right now (loading, or hidden here): try again in a moment.")
 		return false
 	end
 	if not mh or Logic.isPole(mh) then

@@ -132,7 +132,9 @@ end
 -- Returns { macro = text or nil, label, reason, glow, icon = item or nil }.
 function Logic.fishStep(s)
 	if s.unknown then
-		return { label = "Loading", reason = "equipped item info not loaded yet" }
+		-- s.unknown is the reason (item info loading, or hidden by the game)
+		local reason = type(s.unknown) == "string" and s.unknown or "equipped item info not loaded yet"
+		return { label = "Waiting", reason = reason }
 	end
 	local cast = s.castFishing and ("/cast " .. (s.fishingSpell or "Fishing")) or nil
 	if not s.poleEquipped then
@@ -170,7 +172,9 @@ end
 -- s.mhPoison, s.ohPoison: the best poison of each hand's family in the bags; s.mhFamily, s.ohFamily: their names
 function Logic.poisonStep(s)
 	if s.unknown then
-		return { label = "Loading", reason = "equipped item info not loaded yet" }
+		-- s.unknown is the reason (item info loading, or hidden by the game)
+		local reason = type(s.unknown) == "string" and s.unknown or "equipped item info not loaded yet"
+		return { label = "Waiting", reason = reason }
 	end
 	local lines, missing = {}, {}
 	if wanted(s.wantMH) and s.mhName ~= s.wantMH then
