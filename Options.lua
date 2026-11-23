@@ -10,8 +10,8 @@ Options.TITLE = "BaitAndBlade"
 
 local function poisonChoices()
 	local c = Settings.CreateControlTextContainer()
-	for _, family in ipairs(Logic.POISON_FAMILIES) do
-		c:Add(family, family)
+	for _, choice in ipairs(Logic.HAND_CHOICES) do
+		c:Add(choice, choice)
 	end
 	return c:GetData()
 end
@@ -49,15 +49,17 @@ function Options.register()
 
 	Settings.CreateDropdown(
 		category,
-		addon("mainHandPoison", "String", "Main hand poison"),
+		addon("mainHandPoison", "String", "Main hand poison or stone"),
 		poisonChoices,
-		"The poison the button puts on the main hand: the highest rank in your bags that you can use."
+		"What the button puts on the main hand: the highest rank of the poison in your bags that you can use, or "
+			.. "your best sharpening stone. A weapon holds one of them at a time."
 	)
 	Settings.CreateDropdown(
 		category,
-		addon("offHandPoison", "String", "Off hand poison"),
+		addon("offHandPoison", "String", "Off hand poison or stone"),
 		poisonChoices,
-		"The poison the button puts on the off hand: the highest rank in your bags that you can use."
+		"What the button puts on the off hand: the highest rank of the poison in your bags that you can use, or "
+			.. "your best sharpening stone. A weapon holds one of them at a time."
 	)
 
 	if layout and CreateSettingsButtonInitializer then

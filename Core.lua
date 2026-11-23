@@ -7,7 +7,7 @@ BaitAndBlade = ns
 
 local Logic = ns.Logic
 
-ns.VERSION = "0.2.0"
+ns.VERSION = "0.3.0"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
 ns.POISON_ICON = 132273 -- Ability_Poisons
@@ -300,8 +300,8 @@ function ns.gather()
 		ohPoisoned = ohEnchant,
 		mhFamily = set.mainHandPoison,
 		ohFamily = set.offHandPoison,
-		mhPoison = Logic.bestPoison(items, set.mainHandPoison),
-		ohPoison = Logic.bestPoison(items, set.offHandPoison),
+		mhPoison = Logic.bestFor(items, set.mainHandPoison),
+		ohPoison = Logic.bestFor(items, set.offHandPoison),
 	}
 	local fed, whyFed = hasBuff(Logic.FOOD_BUFFS)
 	local elixirUp, whyElixir = hasBuff(Logic.ELIXIR_BUFFS)
@@ -369,18 +369,18 @@ local function addShopping(buy)
 	local tsm = { source = ns.PRICE_SOURCE }
 	for _, kind in ipairs(buy) do
 		local prices = {}
-		local list = kind == "food" and Logic.AGILITY_FOOD or Logic.AGILITY_ELIXIRS
-		for _, e in ipairs(list) do
+		local shop = Logic.SHOP_KINDS[kind]
+		for _, e in ipairs(shop.list) do
 			local p, why = ns.price(e.id)
 			prices[e.id] = p
 			tsm.why = tsm.why or (not p and why or nil)
 		end
 		local rows, cheapest = Logic.shoppingList(kind, level, prices, 4)
 		GameTooltip:AddLine(" ")
-		GameTooltip:AddLine(kind == "food" and "Buy agility food:" or "Buy an agility elixir:", 1, 0.82, 0)
+		GameTooltip:AddLine(shop.header, 1, 0.82, 0)
 		for _, r in ipairs(rows) do
 			GameTooltip:AddDoubleLine(
-				r.name .. " (+" .. r.agi .. " Agi)",
+				r.name .. " (" .. r.bonus .. ")",
 				r.price and money(r.price) or "none seen",
 				1,
 				1,
@@ -540,6 +540,23 @@ local function apply(button, step)
 	end
 end
 
+-- Whether the player rides a flight path. A hidden or missing answer counts as "not flying": the buttons then work
+-- as before, and selftest.taxi says why.
+local function onTaxi()
+	if type(UnitOnTaxi) ~= "function" then
+		selftest.taxi = "UnitOnTaxi missing"
+		return false
+	end
+	local ok, flying = pcall(UnitOnTaxi, "player")
+	if not ok or issecretvalue(flying) then
+		selftest.taxi = ok and "secret" or ("UnitOnTaxi failed: " .. tostring(flying))
+		return false
+	end
+	selftest.taxi = flying and true or false
+	return selftest.taxi
+end
+ns.onTaxi = onTaxi
+
 function ns.refresh()
 	if not ns.frame then
 		return
@@ -547,6 +564,10 @@ function ns.refresh()
 	counters.refreshes = counters.refreshes + 1
 	local fish, poison, agility = ns.gather()
 	local fishStep, poisonStep = Logic.fishStep(fish), Logic.poisonStep(poison)
+	ns.flying = onTaxi()
+	if ns.flying then
+		fishStep, poisonStep = Logic.onTaxi(fishStep), Logic.onTaxi(poisonStep)
+	end
 	apply(ns.fishButton, fishStep)
 	apply(ns.poisonButton, poisonStep)
 	selftest.fish = { label = fishStep.label, reason = fishStep.reason, macro = fishStep.macro, glow = fishStep.glow }
@@ -574,6 +595,9 @@ function ns.refreshAgility(agility)
 		return
 	end
 	local step = Logic.agilityStep(agility)
+	if ns.flying then
+		step = Logic.onTaxi(step)
+	end
 	apply(b, step)
 	selftest.agility = {
 		label = step.label,
@@ -618,6 +642,7 @@ function selftest.snapshot(phase)
 		poison = selftest.poison,
 		agility = selftest.agility,
 		buffs = selftest.buffs,
+		taxi = selftest.taxi,
 		tsm = selftest.tsm,
 		enchants = selftest.enchants,
 		hands = selftest.hands,
@@ -802,6 +827,8 @@ for _, e in ipairs({
 	"GET_ITEM_INFO_RECEIVED",
 	"PLAYER_LEVEL_UP",
 	"SKILL_LINES_CHANGED",
+	"PLAYER_CONTROL_LOST", -- taking off on a flight path
+	"PLAYER_CONTROL_GAINED", -- landing
 }) do
 	events:RegisterEvent(e)
 end

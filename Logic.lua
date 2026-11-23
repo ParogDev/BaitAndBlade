@@ -13,6 +13,27 @@ Logic.POISON_FAMILIES = {
 	"Wound Poison",
 }
 
+-- A hand can take a sharpening stone instead of a poison (one temporary enchant per weapon: the newest replaces
+-- the other). The settings store this name as the hand's choice, next to the poison families.
+Logic.STONE = "Sharpening Stone"
+Logic.HAND_CHOICES = {}
+for i, family in ipairs(Logic.POISON_FAMILIES) do
+	Logic.HAND_CHOICES[i] = family
+end
+Logic.HAND_CHOICES[#Logic.HAND_CHOICES + 1] = Logic.STONE
+
+-- Sharpening stones by item id, from the Forever client's item table (build 1.60.1.70888); 287978 and 287980 are
+-- Forever copies and match by name. score: the damage bonus, and 10 for the Elemental stone's +2% crit so it wins.
+-- Consecrated (undead only) and Blackfathom (Season of Discovery) are left out.
+Logic.SHARPENING_STONES = {
+	{ id = 18262, name = "Elemental Sharpening Stone", bonus = "+2% crit", score = 10, level = 50 },
+	{ id = 12404, name = "Dense Sharpening Stone", bonus = "+8 damage", score = 8, level = 35 },
+	{ id = 7964, name = "Solid Sharpening Stone", bonus = "+6 damage", score = 6, level = 25 },
+	{ id = 2871, name = "Heavy Sharpening Stone", bonus = "+4 damage", score = 4, level = 15 },
+	{ id = 2863, name = "Coarse Sharpening Stone", bonus = "+3 damage", score = 3, level = 5 },
+	{ id = 2862, name = "Rough Sharpening Stone", bonus = "+2 damage", score = 2, level = 1 },
+}
+
 Logic.DEFAULTS = {
 	mainHandWeapon = "Dazzling Longsword",
 	offHandWeapon = "Sword of Omen",
@@ -73,6 +94,11 @@ local function index(list)
 end
 local FOOD_BY_ID, FOOD_BY_NAME = index(Logic.AGILITY_FOOD)
 local ELIXIR_BY_ID, ELIXIR_BY_NAME = index(Logic.AGILITY_ELIXIRS)
+local STONE_BY_ID, STONE_BY_NAME = index(Logic.SHARPENING_STONES)
+
+function Logic.stoneEntry(item)
+	return STONE_BY_ID[item.id] or STONE_BY_NAME[item.name]
+end
 
 -- The table entry for a bag item (by id, then by name for a Forever copy under another id), or nil.
 function Logic.foodEntry(item)
@@ -192,6 +218,21 @@ function Logic.bestPoison(items, family)
 	end)
 end
 
+function Logic.bestStone(items)
+	return Logic.best(items, function(item)
+		local e = Logic.stoneEntry(item)
+		return e and e.score
+	end)
+end
+
+-- The best item in the bags for a hand's choice: a poison family's highest rank, or the best sharpening stone.
+function Logic.bestFor(items, choice)
+	if choice == Logic.STONE then
+		return Logic.bestStone(items)
+	end
+	return Logic.bestPoison(items, choice)
+end
+
 function Logic.bestLure(items)
 	return Logic.best(items, Logic.lureBonus)
 end
@@ -225,15 +266,30 @@ function Logic.countOf(items, entry)
 	return n
 end
 
--- What to buy for one kind ("food" or "elixir") at a player level: the entries the player can use, strongest
--- first. prices[id] is the TSM price in copper (nil: no data). cheapest is the cheapest priced entry of the
--- strongest tier that has a price, so the pick is "the best you can get on the auction house right now".
+-- What each kind of buy reminder lists, and its tooltip header.
+Logic.SHOP_KINDS = {
+	food = { list = Logic.AGILITY_FOOD, header = "Buy agility food:" },
+	elixir = { list = Logic.AGILITY_ELIXIRS, header = "Buy an agility elixir:" },
+	stone = { list = Logic.SHARPENING_STONES, header = "Buy sharpening stones:" },
+}
+
+-- What to buy for one kind ("food", "elixir" or "stone") at a player level: the entries the player can use,
+-- strongest first. prices[id] is the TSM price in copper (nil: no data). cheapest is the cheapest priced entry of
+-- the strongest tier that has a price, so the pick is "the best you can get on the auction house right now".
+-- Each row's bonus is the text the tooltip shows ("+15 Agi", "+8 damage").
 function Logic.shoppingList(kind, level, prices, limit)
-	local list = kind == "food" and Logic.AGILITY_FOOD or Logic.AGILITY_ELIXIRS
+	local list = Logic.SHOP_KINDS[kind].list
 	local rows = {}
 	for _, e in ipairs(list) do
 		if (e.level or 1) <= (level or 60) then
-			rows[#rows + 1] = { id = e.id, name = e.name, agi = e.agi, score = e.score or e.agi, price = prices[e.id] }
+			rows[#rows + 1] = {
+				id = e.id,
+				name = e.name,
+				agi = e.agi,
+				bonus = e.bonus or ("+" .. e.agi .. " Agi"),
+				score = e.score or e.agi,
+				price = prices[e.id],
+			}
 		end
 	end
 	table.sort(rows, function(a, b)
@@ -346,11 +402,12 @@ function Logic.poisonStep(s)
 		return { label = "Poisons", reason = "poison state unknown (the game hides it here)" }
 	end
 	local glow = not s.mhPoisoned or not s.ohPoisoned
+	-- mhPoisoned / ohPoisoned mean "carries a temporary enchant": a poison or a sharpening stone
 	if not s.mhPoisoned and s.mhPoison then
 		return {
 			macro = useLine(s.mhPoison) .. "\n/use 16",
 			label = "Main hand: " .. s.mhPoison.name,
-			reason = "main hand has no poison",
+			reason = "main hand has no " .. (s.mhFamily == Logic.STONE and "sharpening stone" or "poison"),
 			glow = true,
 			icon = s.mhPoison,
 		}
@@ -359,7 +416,7 @@ function Logic.poisonStep(s)
 		return {
 			macro = useLine(s.ohPoison) .. "\n/use 17",
 			label = "Off hand: " .. s.ohPoison.name,
-			reason = "off hand has no poison",
+			reason = "off hand has no " .. (s.ohFamily == Logic.STONE and "sharpening stone" or "poison"),
 			glow = true,
 			icon = s.ohPoison,
 		}
@@ -372,9 +429,18 @@ function Logic.poisonStep(s)
 		if not s.ohPoisoned and s.ohFamily ~= s.mhFamily then
 			want[#want + 1] = s.ohFamily or "off hand poison"
 		end
-		return { label = "Out of poison", reason = "none in your bags: " .. table.concat(want, ", "), glow = true }
+		local step =
+			{ label = "Out of poison", reason = "none in your bags: " .. table.concat(want, ", "), glow = true }
+		-- stones have a shopping list (TSM prices on mouseover); a hand that wants stones and has none names it
+		if (not s.mhPoisoned and s.mhFamily == Logic.STONE) or (not s.ohPoisoned and s.ohFamily == Logic.STONE) then
+			step.buy = { "stone" }
+			if #want == 1 then
+				step.label = "Out of sharpening stones"
+			end
+		end
+		return step
 	end
-	return { label = "Poisoned", reason = "both weapons poisoned" }
+	return { label = "Poisoned", reason = "both weapons have their poison or stone on" }
 end
 
 local KIND_NAME = { food = "agility food", elixir = "agility elixir" }
@@ -450,6 +516,19 @@ function Logic.agilityStep(s)
 	end
 	local line = "Well Fed and elixir on; %d food, %d elixirs in your bags"
 	return { label = "Buffed", reason = line:format(s.foodCount or 0, s.elixirCount or 0), hidden = true }
+end
+
+-- On a flight path nothing can be used and nothing bought: the step loses its macro, glow and buy reminder, and
+-- names what waits for the landing. A buy reminder goes out of sight altogether (shown under the mouse only), as
+-- does a step that was already hidden.
+function Logic.onTaxi(step)
+	return {
+		label = "On a flight path",
+		reason = "after you land: " .. tostring(step.label),
+		icon = step.icon,
+		hidden = step.hidden or step.shop or step.buy ~= nil or nil,
+		taxi = true,
+	}
 end
 
 return Logic

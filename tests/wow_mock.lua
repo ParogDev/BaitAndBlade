@@ -169,6 +169,15 @@ function M.install()
 	M.auras = {} -- spell id -> true, or "secret"
 	M.prices = {} -- item id -> copper
 	M.level = 60
+	M.taxi = false -- true, false or "secret"
+	_G.UnitOnTaxi = function()
+		if M.taxi == "secret" then
+			local v = {}
+			M.secret[v] = true
+			return v
+		end
+		return M.taxi
+	end
 	_G.C_UnitAuras = {
 		GetPlayerAuraBySpellID = function(id)
 			local a = M.auras[id]

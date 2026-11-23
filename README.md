@@ -16,6 +16,10 @@ A WoW: Forever addon for rogues who fish. It puts three buttons on screen. Each 
 
 The button glows while your weapons are on and either hand has no poison. Defaults: Instant Poison on the main hand, Crippling Poison on the off hand. Only ranks you can use count.
 
+Either hand can take a sharpening stone instead (Options: "Sharpening Stone"). The button then puts your best stone on it: Elemental, Dense, Solid, Heavy, Coarse, Rough. A weapon holds one poison or one stone at a time. With no stones left, the tooltip lists the ones you can use and TSM's price for each.
+
+On a flight path all three buttons go quiet (no glow, no click, no buy reminder) until you land.
+
 **Agility button**
 
 1. No Well Fed buff: eats your strongest agility food (on Forever the wolf, lion, crocolisk dishes, Jungle Stew and the new steaks give Agility). Sit 10 seconds for the buff.
