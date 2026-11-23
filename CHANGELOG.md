@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Sharpening stones: each hand's choice in Options can now be Sharpening Stone instead of a poison. The weapons button then puts your best stone on that hand (Elemental before Dense before Solid and so on). A weapon holds one poison or one stone at a time.
+- Out of stones, the weapons button's tooltip lists the stones you can use with TSM's lowest buyout.
+- On a flight path the buttons go quiet: no glow, no click, and no buy reminder. They pick up again when you land.
+
 ## 0.2.0
 
 - Third button, agility food and elixir. Without Well Fed it eats your strongest agility food, then without an agility elixir it drinks your strongest one. It glows while it has something to use.

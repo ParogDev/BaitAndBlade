@@ -26,7 +26,7 @@ describe("Core", function()
 	it("keeps the selftest contract", function()
 		ns = mock.loadAddon(".")
 		local st = ns.selftest.snapshot("test")
-		assert.equal("0.2.0", st.version)
+		assert.equal("0.3.0", st.version)
 		assert.equal("1.60.1.70790", st.build)
 		assert.is_table(BaitAndBladeDB.selftest)
 	end)
@@ -77,6 +77,53 @@ describe("Core", function()
 		mock.bag(IP6, CP2)
 		ns = mock.loadAddon(".", { settings = { mainHandPoison = "Crippling Poison" } })
 		assert.equal("/use Crippling Poison II\n/use 16", macro(ns.poisonButton))
+	end)
+
+	it("puts the best sharpening stone on a hand set to stones, and lists stones to buy when out", function()
+		mock.item(12404, { name = "Dense Sharpening Stone", classID = 0, subclassID = 8 })
+		mock.item(7964, { name = "Solid Sharpening Stone", classID = 0, subclassID = 8 })
+		mock.equipped = { [16] = MH, [17] = OH }
+		mock.enchant[0] = true
+		mock.bag(IP6, 7964, 12404)
+		ns = mock.loadAddon(".", { settings = { offHandPoison = "Sharpening Stone" } })
+		assert.equal("/use Dense Sharpening Stone\n/use 17", macro(ns.poisonButton))
+
+		mock.bag(IP6)
+		mock.prices[12404] = 500
+		ns.refresh()
+		assert.equal("Out of sharpening stones", ns.poisonButton.step.label)
+		assert.same({ "stone" }, ns.poisonButton.step.buy)
+		ns.poisonButton._scripts.OnEnter(ns.poisonButton)
+		assert.same({ id = 12404, price = 500 }, ns.selftest.tsm.stone)
+	end)
+
+	it("goes quiet on a flight path: no macro, no glow, no buy reminder", function()
+		mock.equipped = { [16] = MH, [17] = OH }
+		mock.bag(IP6, CP2)
+		mock.taxi = true
+		ns = mock.loadAddon(".")
+		assert.equal("", macro(ns.poisonButton))
+		assert.is_false(ns.poisonButton.glow:IsShown())
+		assert.equal("On a flight path", ns.poisonButton.step.label)
+		-- no food and no elixir: on the ground this is a coin, in the air it stays out of sight
+		assert.is_nil(ns.agilityButton.step.buy)
+		assert.equal(0, ns.agilityButton:GetAlpha())
+		assert.is_true(ns.selftest.taxi)
+
+		mock.taxi = false
+		ns.refresh()
+		assert.equal("/use Instant Poison VI\n/use 16", macro(ns.poisonButton))
+		assert.is_true(ns.agilityButton.step.shop)
+		assert.equal(1, ns.agilityButton:GetAlpha())
+	end)
+
+	it("treats a hidden taxi state as on the ground", function()
+		mock.equipped = { [16] = MH, [17] = OH }
+		mock.bag(IP6, CP2)
+		mock.taxi = "secret"
+		ns = mock.loadAddon(".")
+		assert.equal("/use Instant Poison VI\n/use 16", macro(ns.poisonButton))
+		assert.equal("secret", ns.selftest.taxi)
 	end)
 
 	it("never writes attributes in combat and catches up after", function()
