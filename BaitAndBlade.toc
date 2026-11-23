@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: BaitAndBlade
+## Notes: Two buttons: one equips your best fishing pole, puts your best lure on it and casts; one equips your weapons and puts your best poisons on them, and glows while a hand has none.
+## Author: ParogDev
+## Version: @project-version@
+## SavedVariables: BaitAndBladeDB
+## X-Game: forever
+## X-Website: https://github.com/ParogDev/BaitAndBlade
+## X-License: MIT
+## IconTexture: Interface\Icons\Trade_Fishing
+
+Logic.lua
+Options.lua
+Core.lua
