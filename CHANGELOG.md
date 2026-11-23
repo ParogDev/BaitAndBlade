@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- An empty off hand (two-hander set up) no longer counts as unpoisoned.
+- Weapons worn in the wrong hands are swapped back instead of reported missing.
+- While an equipped item's info is still loading, the buttons wait instead of guessing.
+
 ## 0.1.0
 
 - First version. A fishing button equips your best pole, puts your best lure on it, then casts Fishing.

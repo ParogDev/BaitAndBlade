@@ -7,7 +7,7 @@ BaitAndBlade = ns
 
 local Logic = ns.Logic
 
-ns.VERSION = "0.1.0"
+ns.VERSION = "0.1.1"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
 ns.POISON_ICON = 132273 -- Ability_Poisons
@@ -117,12 +117,21 @@ function ns.bagItems()
 	return items
 end
 
+-- The item in an equipment slot and the slot's state: "item", "empty", or "unknown" (an item is there but the
+-- client hides its id or has not loaded its info yet: decide nothing until it has).
 local function equipped(slot)
 	local id = GetInventoryItemID("player", slot)
-	if not id or issecretvalue(id) then
-		return nil
+	if not id then
+		return nil, "empty"
 	end
-	return describe(id)
+	if issecretvalue(id) then
+		return nil, "secret"
+	end
+	local item = describe(id)
+	if not item then
+		return nil, "unknown"
+	end
+	return item, "item"
 end
 
 -- Whether a weapon slot carries a temporary enchant (poison, lure): true / false, nil when the client hides it.
@@ -175,19 +184,36 @@ end
 function ns.gather()
 	local set = ns.settings
 	local items = ns.bagItems()
-	local mh, oh = equipped(SLOT_MH), equipped(SLOT_OH)
+	local mh, mhState = equipped(SLOT_MH)
+	local oh, ohState = equipped(SLOT_OH)
+	-- "not now" reasons: fishing only reads the main hand, the poison button both hands
+	local function why(state)
+		if state == "secret" then
+			return "not now: the game hides your equipped items here"
+		elseif state == "unknown" then
+			return "equipped item info not loaded yet"
+		end
+	end
+	local fishUnknown = why(mhState)
+	local unknown = fishUnknown or why(ohState)
+	selftest.hands = { mainHand = mhState, offHand = ohState }
 	local mhSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand or 0
 	local ohSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.OffHand or 1
 	selftest.enchants = {}
-	-- not `x and f() or false`: f() returning nil (hidden) must stay nil, not turn into "no enchant"
-	local mhEnchant, ohEnchant = false, false
-	if mh then
+	-- A hand with no weapon in it has nothing to poison: it counts as done (an equip step comes first when a
+	-- weapon is wanted there). Not `x and f() or false`: f() returning nil (hidden) must stay nil.
+	local mhEnchant, ohEnchant = true, true
+	if mh and mh.classID == Logic.WEAPON_CLASS then
 		mhEnchant = tempEnchant(mhSlot, "mainHand")
 	end
-	if oh then
+	if oh and oh.classID == Logic.WEAPON_CLASS then
 		ohEnchant = tempEnchant(ohSlot, "offHand")
 	end
-	local function inBags(name)
+	-- a wanted weapon can be in the bags or already on either hand (swapped hands: /equipslot moves it)
+	local function have(name)
+		if (mh and mh.name == name) or (oh and oh.name == name) then
+			return true
+		end
 		for _, it in ipairs(items) do
 			if it.name == name then
 				return true
@@ -197,6 +223,7 @@ function ns.gather()
 	end
 	local poleEquipped = mh ~= nil and Logic.isPole(mh)
 	local fish = {
+		unknown = fishUnknown,
 		poleEquipped = poleEquipped,
 		lure = poleEquipped and mhEnchant, -- nil (hidden) stays nil
 		pole = Logic.bestPole(items),
@@ -206,12 +233,13 @@ function ns.gather()
 		fishingSpell = fishingSpellName(),
 	}
 	local poison = {
+		unknown = unknown,
 		mhName = mh and mh.name,
 		ohName = oh and oh.name,
 		wantMH = set.mainHandWeapon,
 		wantOH = set.offHandWeapon,
-		haveMH = inBags(set.mainHandWeapon),
-		haveOH = inBags(set.offHandWeapon),
+		haveMH = have(set.mainHandWeapon),
+		haveOH = have(set.offHandWeapon),
 		mhPoisoned = mhEnchant,
 		ohPoisoned = ohEnchant,
 		mhFamily = set.mainHandPoison,
@@ -311,9 +339,14 @@ local function makeButton(name, parent, title, defaultIcon)
 	b:SetScript("OnDragStart", function()
 		if not ns.settings.locked and IsShiftKeyDown() and not InCombatLockdown() then
 			parent:StartMoving()
+			parent.moving = true
 		end
 	end)
 	b:SetScript("OnDragStop", function()
+		if not parent.moving then
+			return
+		end
+		parent.moving = false
 		parent:StopMovingOrSizing()
 		local point, _, relPoint, x, y = parent:GetPoint()
 		ns.db.position = { point = point, relPoint = relPoint, x = x, y = y }
@@ -430,7 +463,12 @@ end
 -- ---------------------------------------------------------------------------------------------------------
 -- Stores the weapons in the main and off hand as the ones the poison button equips.
 function ns.rememberWeapons()
-	local mh, oh = equipped(SLOT_MH), equipped(SLOT_OH)
+	local mh, mhState = equipped(SLOT_MH)
+	local oh, ohState = equipped(SLOT_OH)
+	if mhState == "unknown" or ohState == "unknown" or mhState == "secret" or ohState == "secret" then
+		say("can't read your weapons right now (loading, or hidden here): try again in a moment.")
+		return false
+	end
 	if not mh or Logic.isPole(mh) then
 		say("equip your normal weapons first (main hand is " .. (mh and mh.name or "empty") .. ").")
 		return false
@@ -466,11 +504,13 @@ function ns.slash(msg)
 	elseif cmd == "weapons" then
 		ns.rememberWeapons()
 	elseif cmd == "reset" then
-		ns.db.position = nil
-		if not InCombatLockdown() then
-			ns.frame:ClearAllPoints()
-			ns.frame:SetPoint("CENTER", UIParent, "CENTER", 0, -180)
+		if InCombatLockdown() then
+			say("in combat: try /bab reset after combat.")
+			return
 		end
+		ns.db.position = nil
+		ns.frame:ClearAllPoints()
+		ns.frame:SetPoint("CENTER", UIParent, "CENTER", 0, -180)
 	elseif cmd == "options" or cmd == "config" then
 		if ns.Options and ns.Options.category then
 			Settings.OpenToCategory(ns.Options.category:GetID())
