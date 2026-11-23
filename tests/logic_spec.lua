@@ -162,3 +162,79 @@ describe("Logic.poisonStep", function()
 		assert.is_nil(s.macro)
 	end)
 end)
+
+describe("Logic agility", function()
+	local stew = { id = 12212, name = "Jungle Stew", count = 3 }
+	local poivre = { id = 250069, name = "Flank au Poivre", count = 1 }
+	local greater = { id = 9187, name = "Elixir of Greater Agility", count = 2 }
+	local mongoose = { id = 13452, name = "Elixir of the Mongoose", count = 1 }
+
+	it("picks the strongest food and elixir, skipping ones the player can't use", function()
+		assert.equal(250069, Logic.bestFood({ stew, poivre }).id)
+		local tooHigh = { id = 250069, name = "Flank au Poivre", usable = false }
+		assert.equal(12212, Logic.bestFood({ stew, tooHigh }).id)
+		assert.equal(13452, Logic.bestElixir({ greater, mongoose }).id)
+		-- a Forever copy under another id matches by name
+		assert.equal(777, Logic.bestFood({ { id = 777, name = "Jungle Stew" } }).id)
+		assert.equal(4, Logic.countOf({ stew, poivre, greater }, Logic.foodEntry))
+	end)
+
+	local function state(over)
+		local s = { fed = false, elixirUp = false, foodCount = 0, elixirCount = 0, lowCount = 5 }
+		for k, v in pairs(over) do
+			s[k] = v
+		end
+		return s
+	end
+
+	it("eats first, then drinks, glowing", function()
+		local s = Logic.agilityStep(state({ food = stew, elixir = greater }))
+		assert.equal("/use Jungle Stew", s.macro)
+		assert.is_true(s.glow)
+		s = Logic.agilityStep(state({ fed = true, food = stew, elixir = greater }))
+		assert.equal("/use Elixir of Greater Agility", s.macro)
+	end)
+
+	it("drinks while naming the missing food as a buy", function()
+		local s = Logic.agilityStep(state({ elixir = greater }))
+		assert.equal("/use Elixir of Greater Agility", s.macro)
+		assert.same({ "food" }, s.buy)
+	end)
+
+	it("turns into a buy reminder with nothing to use", function()
+		local s = Logic.agilityStep(state({ fed = true }))
+		assert.is_nil(s.macro)
+		assert.is_true(s.shop)
+		assert.same({ "elixir" }, s.buy)
+		assert.equal("Buy agility elixir", s.label)
+	end)
+
+	it("hides when buffed and stocked, reminds when low", function()
+		local s = Logic.agilityStep(state({ fed = true, elixirUp = true, foodCount = 5, elixirCount = 7 }))
+		assert.is_true(s.hidden)
+		assert.is_nil(s.macro)
+		s = Logic.agilityStep(state({ fed = true, elixirUp = true, foodCount = 2, elixirCount = 7 }))
+		assert.is_falsy(s.hidden)
+		assert.same({ "food" }, s.buy)
+		assert.is_true(s.shop)
+	end)
+
+	it("waits when the buffs are hidden", function()
+		local s = Logic.agilityStep(state({ unknown = "not now: hidden", fed = nil }))
+		assert.equal("Waiting", s.label)
+		assert.is_nil(s.macro)
+	end)
+
+	it("lists what to buy, strongest usable first, cheapest of the best priced tier", function()
+		local prices = { [250069] = 9000, [250072] = 7000, [12212] = 100 }
+		local rows, cheapest = Logic.shoppingList("food", 50, prices, 4)
+		assert.equal(4, #rows)
+		assert.equal(20, rows[1].agi) -- Filet o' Flank (level 55) left out at level 50
+		assert.equal(250072, cheapest.id)
+		rows, cheapest = Logic.shoppingList("food", 40, prices)
+		assert.equal(15, rows[1].agi)
+		assert.equal(12212, cheapest.id)
+		local _, none = Logic.shoppingList("elixir", 60, {})
+		assert.is_nil(none)
+	end)
+end)

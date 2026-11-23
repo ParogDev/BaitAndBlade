@@ -13,11 +13,12 @@ local client = {
 	"CreateFrame", "C_AddOns", "C_Item", "C_Container", "C_Spell", "C_Timer", "GetBuildInfo", "GetInventoryItemID",
 	"InCombatLockdown", "IsShiftKeyDown", "WOW_PROJECT_ID", "issecretvalue", "date", "strtrim", "Enum",
 	"GetBindingAction", "GetBindingKey", "SetBinding", "SaveBindings", "GetCurrentBindingSet", "UnitGUID",
+	"C_UnitAuras", "C_CurrencyInfo", "UnitLevel",
 }
 -- FrameXML globals the generated list may not carry.
 local framexml = {
 	"DEFAULT_CHAT_FRAME", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "NUM_BAG_SLOTS", "UIParent", "GameTooltip", "Settings",
-	"CreateSettingsButtonInitializer",
+	"CreateSettingsButtonInitializer", "TSM_API",
 }
 
 local ok, wow = pcall(dofile, "../../tools/luacheck-wow-globals.lua")

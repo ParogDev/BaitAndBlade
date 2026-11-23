@@ -26,7 +26,7 @@ describe("Core", function()
 	it("keeps the selftest contract", function()
 		ns = mock.loadAddon(".")
 		local st = ns.selftest.snapshot("test")
-		assert.equal("0.1.2", st.version)
+		assert.equal("0.2.0", st.version)
 		assert.equal("1.60.1.70790", st.build)
 		assert.is_table(BaitAndBladeDB.selftest)
 	end)
@@ -200,5 +200,61 @@ describe("Core", function()
 		ns = mock.loadAddon(".")
 		assert.is_false(ns.rememberWeapons())
 		assert.equal("Dazzling Longsword", ns.settings.mainHandWeapon)
+	end)
+
+	describe("agility button", function()
+		local STEW, GREATER = 12212, 9187
+		before_each(function()
+			mock.item(STEW, { name = "Jungle Stew", classID = 0, subclassID = 5 })
+			mock.item(GREATER, { name = "Elixir of Greater Agility", classID = 0, subclassID = 2 })
+			mock.equipped = { [16] = MH, [17] = OH }
+		end)
+
+		it("eats, then drinks, then hides when stocked; stacks are counted", function()
+			mock.stacks = { [STEW] = 6, [GREATER] = 5 }
+			mock.bag(STEW, GREATER)
+			ns = mock.loadAddon(".")
+			assert.equal("/use Jungle Stew", macro(ns.agilityButton))
+			assert.is_true(ns.agilityButton.glow:IsShown())
+
+			mock.auras[1248420] = true
+			ns.refresh()
+			assert.equal("/use Elixir of Greater Agility", macro(ns.agilityButton))
+
+			mock.auras[11334] = true
+			ns.refresh()
+			assert.equal("", macro(ns.agilityButton))
+			assert.equal(0, ns.agilityButton:GetAlpha())
+			assert.equal(6, ns.selftest.agility.foodCount)
+		end)
+
+		it("shows a buy reminder with nothing in the bags and reads TSM prices on mouseover", function()
+			mock.bag(MH)
+			mock.auras[1248420] = true
+			mock.prices[9187] = 12000
+			mock.prices[13452] = 30000
+			ns = mock.loadAddon(".")
+			assert.equal(1, ns.agilityButton:GetAlpha())
+			assert.is_true(ns.agilityButton.step.shop)
+			ns.agilityButton._scripts.OnEnter(ns.agilityButton)
+			assert.same({ id = 13452, price = 30000 }, ns.selftest.tsm.elixir)
+		end)
+
+		it("keeps its step in combat and waits while buffs are secret", function()
+			mock.bag(STEW)
+			mock.auras[1248420] = "secret"
+			ns = mock.loadAddon(".")
+			assert.equal("Waiting", ns.agilityButton.step.label)
+			assert.equal("", macro(ns.agilityButton))
+			mock.auras[1248420] = nil
+			mock.inCombat = true
+			ns.refresh()
+			assert.equal("Waiting", ns.agilityButton.step.label)
+		end)
+
+		it("goes away when switched off", function()
+			ns = mock.loadAddon(".", { settings = { agility = false } })
+			assert.is_false(ns.agilityButton:IsShown())
+		end)
 	end)
 end)

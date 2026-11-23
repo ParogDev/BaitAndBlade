@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Third button, agility food and elixir. Without Well Fed it eats your strongest agility food, then without an agility elixir it drinks your strongest one. It glows while it has something to use.
+- With none of a missing kind in your bags, the button turns into a coin. Its tooltip lists the strongest food or elixir you can use with TSM's lowest auction house buyout, and names the cheapest of the best tier.
+- Buffed both ways with at least 5 of each in your bags, the button shows only under the mouse. Below 5 it reminds you to restock.
+- Options: switch the button off. Keybindings: bind it (no default key). Macro: `/click BaitAndBladeAgilityButton`.
+
 ## 0.1.2
 
 - Key bindings: both buttons are listed under Options > Keybindings > BaitAndBlade. On the first login the addon binds SHIFT-` to the fishing button and CTRL-` to the weapons button, only where the key is free. After that your own changes stick.
