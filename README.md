@@ -1,6 +1,6 @@
 # BaitAndBlade
 
-A WoW: Forever addon for rogues who fish. It puts two buttons on screen. Each click does the next thing that is missing.
+A WoW: Forever addon for rogues who fish. It puts three buttons on screen. Each click does the next thing that is missing.
 
 **Fishing button**
 
@@ -15,6 +15,13 @@ A WoW: Forever addon for rogues who fish. It puts two buttons on screen. Each cl
 3. Off hand has no poison: the same for the off hand.
 
 The button glows while your weapons are on and either hand has no poison. Defaults: Instant Poison on the main hand, Crippling Poison on the off hand. Only ranks you can use count.
+
+**Agility button**
+
+1. No Well Fed buff: eats your strongest agility food (on Forever the wolf, lion, crocolisk dishes, Jungle Stew and the new steaks give Agility). Sit 10 seconds for the buff.
+2. No agility elixir on: drinks your strongest one (Mongoose before Greater Agility before Ferocity and so on).
+3. Nothing to use for a missing buff: the button shows a coin. Hover it for the strongest food or elixir you can use and TradeSkillMaster's lowest buyout for each, plus the cheapest of the best tier.
+4. Both buffs on and at least 5 of each in your bags: the button shows only under the mouse. Below 5 it reminds you to restock.
 
 ## Setup
 

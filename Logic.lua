@@ -20,9 +20,68 @@ Logic.DEFAULTS = {
 	offHandPoison = "Crippling Poison",
 	castFishing = true, -- the fishing button casts Fishing once the pole and the lure are on
 	glowFishing = true, -- the fishing button glows when the pole is on without a lure
+	agility = true, -- the third button: agility food, then agility elixir
+	lowCount = 5, -- below this many of either in the bags, the agility button shows a buy reminder
 	locked = false,
 	shown = true,
 }
+
+-- Agility food by item id, from the Forever client's item table (build 1.60.1.70888): on Forever the old Stamina
+-- and Spirit well-fed dishes give Agility, by tier. agi is the Well Fed bonus, level the required level.
+Logic.AGILITY_FOOD = {
+	{ id = 238638, name = "Filet o' Flank", agi = 25, level = 55 },
+	{ id = 250069, name = "Flank au Poivre", agi = 20, level = 45 },
+	{ id = 250072, name = "Swiftstrike Steak", agi = 20, level = 45 },
+	{ id = 12212, name = "Jungle Stew", agi = 15, level = 35 },
+	{ id = 18045, name = "Tender Wolf Steak", agi = 15, level = 35 },
+	{ id = 287973, name = "Tender Wolf Steak", agi = 15, level = 1 },
+	{ id = 3728, name = "Tasty Lion Steak", agi = 10, level = 25 },
+	{ id = 13851, name = "Hot Wolf Ribs", agi = 10, level = 25 },
+	{ id = 20074, name = "Heavy Crocolisk Stew", agi = 10, level = 25 },
+	{ id = 1017, name = "Seasoned Wolf Kabob", agi = 5, level = 15 },
+	{ id = 3727, name = "Hot Lion Chops", agi = 5, level = 15 },
+	{ id = 3664, name = "Crocolisk Gumbo", agi = 5, level = 15 },
+	{ id = 12209, name = "Lean Wolf Steak", agi = 5, level = 15 },
+	{ id = 2684, name = "Coyote Steak", agi = 3, level = 5 },
+	{ id = 3662, name = "Crocolisk Steak", agi = 3, level = 5 },
+	{ id = 2680, name = "Spiced Wolf Meat", agi = 1, level = 1 },
+}
+
+-- Agility elixirs (Forever has no item called "agility potion": the battle elixirs are the agility drinks). score is
+-- the Agility, plus 2 for the Mongoose's crit, so it wins its tie with Greater Agility.
+Logic.AGILITY_ELIXIRS = {
+	{ id = 13452, name = "Elixir of the Mongoose", agi = 25, score = 27, level = 46 },
+	{ id = 9187, name = "Elixir of Greater Agility", agi = 25, score = 25, level = 38 },
+	{ id = 250328, name = "Elixir of Cunning", agi = 25, score = 25, level = 55 },
+	{ id = 250350, name = "Elixir of Ferocity", agi = 18, score = 18, level = 55 },
+	{ id = 8949, name = "Elixir of Agility", agi = 15, score = 15, level = 27 },
+	{ id = 3390, name = "Elixir of Lesser Agility", agi = 8, score = 8, level = 18 },
+	{ id = 2457, name = "Elixir of Minor Agility", agi = 4, score = 4, level = 2 },
+}
+
+-- The buffs they give, by spell id: either Well Fed (the tiered one, and Filet o' Flank's own), and each elixir's.
+Logic.FOOD_BUFFS = { 1248420, 1225779 }
+Logic.ELIXIR_BUFFS = { 17538, 11334, 1250918, 1250985, 11328, 3160, 2374 }
+
+local function index(list)
+	local byID, byName = {}, {}
+	for _, e in ipairs(list) do
+		byID[e.id] = e
+		byName[e.name] = byName[e.name] or e
+	end
+	return byID, byName
+end
+local FOOD_BY_ID, FOOD_BY_NAME = index(Logic.AGILITY_FOOD)
+local ELIXIR_BY_ID, ELIXIR_BY_NAME = index(Logic.AGILITY_ELIXIRS)
+
+-- The table entry for a bag item (by id, then by name for a Forever copy under another id), or nil.
+function Logic.foodEntry(item)
+	return FOOD_BY_ID[item.id] or FOOD_BY_NAME[item.name]
+end
+
+function Logic.elixirEntry(item)
+	return ELIXIR_BY_ID[item.id] or ELIXIR_BY_NAME[item.name]
+end
 
 -- Default keys, set once (only on a key that is free or already ours) and then left to Options > Keybindings.
 Logic.KEYS = {
@@ -141,6 +200,66 @@ function Logic.bestPole(items)
 	return Logic.best(items, Logic.poleBonus)
 end
 
+function Logic.bestFood(items)
+	return Logic.best(items, function(item)
+		local e = Logic.foodEntry(item)
+		return e and e.agi
+	end)
+end
+
+function Logic.bestElixir(items)
+	return Logic.best(items, function(item)
+		local e = Logic.elixirEntry(item)
+		return e and e.score
+	end)
+end
+
+-- How many of a kind the bags hold, usable ones only (item.count is the stack total; 1 when unknown).
+function Logic.countOf(items, entry)
+	local n = 0
+	for _, item in ipairs(items) do
+		if item.usable ~= false and entry(item) then
+			n = n + (item.count or 1)
+		end
+	end
+	return n
+end
+
+-- What to buy for one kind ("food" or "elixir") at a player level: the entries the player can use, strongest
+-- first. prices[id] is the TSM price in copper (nil: no data). cheapest is the cheapest priced entry of the
+-- strongest tier that has a price, so the pick is "the best you can get on the auction house right now".
+function Logic.shoppingList(kind, level, prices, limit)
+	local list = kind == "food" and Logic.AGILITY_FOOD or Logic.AGILITY_ELIXIRS
+	local rows = {}
+	for _, e in ipairs(list) do
+		if (e.level or 1) <= (level or 60) then
+			rows[#rows + 1] = { id = e.id, name = e.name, agi = e.agi, score = e.score or e.agi, price = prices[e.id] }
+		end
+	end
+	table.sort(rows, function(a, b)
+		if a.score ~= b.score then
+			return a.score > b.score
+		end
+		return a.id < b.id
+	end)
+	local cheapest
+	for _, r in ipairs(rows) do
+		if r.price then
+			if cheapest and r.score < cheapest.score then
+				break
+			end
+			if not cheapest or r.price < cheapest.price then
+				cheapest = r
+			end
+		end
+	end
+	local shown = {}
+	for i = 1, math.min(#rows, limit or #rows) do
+		shown[i] = rows[i]
+	end
+	return shown, cheapest
+end
+
 -- The macro line that uses an item: by name (what /use expects), by id when the name is not loaded.
 local function useLine(item)
 	return "/use " .. (item.name or ("item:" .. item.id))
@@ -256,6 +375,81 @@ function Logic.poisonStep(s)
 		return { label = "Out of poison", reason = "none in your bags: " .. table.concat(want, ", "), glow = true }
 	end
 	return { label = "Poisoned", reason = "both weapons poisoned" }
+end
+
+local KIND_NAME = { food = "agility food", elixir = "agility elixir" }
+
+-- What the agility button does next: food first, then the elixir.
+-- s.fed, s.elixirUp: the buff is on (true / false), nil when unknown (s.unknown says why)
+-- s.food, s.elixir: the strongest of each in the bags (nil when none); s.foodCount, s.elixirCount: totals
+-- s.lowCount: below this many, remind to buy
+-- Returns { macro, label, reason, glow, icon, buy = { "food" / "elixir" ... } or nil, hidden }.
+-- hidden: both buffs on and enough of both: the button shows only under the mouse.
+function Logic.agilityStep(s)
+	if s.unknown then
+		return { label = "Waiting", reason = s.unknown }
+	end
+	local low = s.lowCount or 5
+	local buy = {}
+	if not s.fed and not s.food then
+		buy[#buy + 1] = "food"
+	end
+	if not s.elixirUp and not s.elixir then
+		buy[#buy + 1] = "elixir"
+	end
+	local function needs()
+		local names = {}
+		for _, k in ipairs(buy) do
+			names[#names + 1] = KIND_NAME[k]
+		end
+		return table.concat(names, " and ")
+	end
+	local step
+	if not s.fed and s.food then
+		step = {
+			macro = useLine(s.food),
+			label = "Eat " .. s.food.name,
+			reason = "no Well Fed buff (sit 10 seconds to get it)",
+			glow = true,
+			icon = s.food,
+		}
+	elseif not s.elixirUp and s.elixir then
+		step = {
+			macro = useLine(s.elixir),
+			label = "Drink " .. s.elixir.name,
+			reason = "no agility elixir on",
+			glow = true,
+			icon = s.elixir,
+		}
+	end
+	if step then
+		if #buy > 0 then
+			step.buy = buy
+			step.reason = step.reason .. "; none in your bags: " .. needs()
+		end
+		return step
+	end
+	if #buy > 0 then
+		return { label = "Buy " .. needs(), reason = "buff missing and none in your bags", buy = buy, shop = true }
+	end
+	-- both buffs on: remind when either runs low
+	if (s.foodCount or 0) < low then
+		buy[#buy + 1] = "food"
+	end
+	if (s.elixirCount or 0) < low then
+		buy[#buy + 1] = "elixir"
+	end
+	if #buy > 0 then
+		local line = "buffed; running low: %d food, %d elixirs left"
+		return {
+			label = "Low on " .. needs(),
+			reason = line:format(s.foodCount or 0, s.elixirCount or 0),
+			buy = buy,
+			shop = true,
+		}
+	end
+	local line = "Well Fed and elixir on; %d food, %d elixirs in your bags"
+	return { label = "Buffed", reason = line:format(s.foodCount or 0, s.elixirCount or 0), hidden = true }
 end
 
 return Logic

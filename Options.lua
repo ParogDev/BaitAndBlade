@@ -88,6 +88,12 @@ function Options.register()
 		addon("glowFishing", "Boolean", "Glow when the lure is missing"),
 		"The fishing button glows while the pole is on without a lure and one is in your bags."
 	)
+	Settings.CreateCheckbox(
+		category,
+		addon("agility", "Boolean", "Agility food and elixir button"),
+		"A third button eats your strongest agility food, then drinks your strongest agility elixir. With none in "
+			.. "your bags it shows what to buy and its TSM price; buffed and stocked, it shows only under the mouse."
+	)
 	local locked = addon("locked", "Boolean", "Lock the buttons")
 	Settings.CreateCheckbox(category, locked, "Unlocked, shift-drag a button to move both.")
 

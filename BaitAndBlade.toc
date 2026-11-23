@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: BaitAndBlade
-## Notes: Two buttons: one equips your best fishing pole, puts your best lure on it and casts; one equips your weapons and puts your best poisons on them, and glows while a hand has none.
+## Notes: Two buttons: one equips your best fishing pole, puts your best lure on it and casts; one equips your weapons and puts your best poisons on them, and glows while a hand has none; one eats your best agility food and drinks your best agility elixir.
 ## Author: ParogDev
 ## Version: @project-version@
 ## SavedVariables: BaitAndBladeDB

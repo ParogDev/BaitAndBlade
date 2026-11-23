@@ -28,6 +28,12 @@ local function newFrame(_, name)
 	function f:IsShown()
 		return self._shown
 	end
+	function f:SetAlpha(a)
+		self._alpha = a
+	end
+	function f:GetAlpha()
+		return self._alpha or 1
+	end
 	function f:CreateTexture()
 		return newFrame()
 	end
@@ -156,7 +162,31 @@ function M.install()
 			if not id then
 				return nil
 			end
-			return { itemID = id, stackCount = 1 }
+			return { itemID = id, stackCount = M.stacks[id] or 1 }
+		end,
+	}
+	M.stacks = {} -- id -> stack size of each bag slot holding it
+	M.auras = {} -- spell id -> true, or "secret"
+	M.prices = {} -- item id -> copper
+	M.level = 60
+	_G.C_UnitAuras = {
+		GetPlayerAuraBySpellID = function(id)
+			local a = M.auras[id]
+			if a == "secret" then
+				local v = {}
+				M.secret[v] = true
+				return v
+			end
+			return a and { spellId = id } or nil
+		end,
+	}
+	_G.UnitLevel = function()
+		return M.level
+	end
+	_G.TSM_API = {
+		GetCustomPriceValue = function(_, itemString)
+			local id = tonumber(itemString:match("^i:(%d+)$"))
+			return M.prices[id]
 		end,
 	}
 	_G.Settings = nil

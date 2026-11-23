@@ -7,10 +7,13 @@ BaitAndBlade = ns
 
 local Logic = ns.Logic
 
-ns.VERSION = "0.1.2"
+ns.VERSION = "0.2.0"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
 ns.POISON_ICON = 132273 -- Ability_Poisons
+ns.AGILITY_ICON = "Interface\\Icons\\Spell_Misc_Food"
+ns.SHOP_ICON = "Interface\\Icons\\INV_Misc_Coin_01"
+ns.PRICE_SOURCE = "dbminbuyout" -- TSM: the cheapest buyout seen on the auction house
 ns.BUTTON_SIZE = 36
 
 local DB_VERSION = 1
@@ -97,7 +100,7 @@ local function describe(itemID)
 end
 ns.describe = describe
 
--- Every distinct item in the bags, once per id.
+-- Every distinct item in the bags, once per id, with count = the total of its stacks.
 function ns.bagItems()
 	local items, seen = {}, {}
 	local last = NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4
@@ -105,16 +108,69 @@ function ns.bagItems()
 		for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
 			local info = C_Container.GetContainerItemInfo(bag, slot)
 			local id = info and info.itemID
-			if id and not issecretvalue(id) and not seen[id] then
-				seen[id] = true
-				local item = describe(id)
-				if item then
-					items[#items + 1] = item
+			if id and not issecretvalue(id) then
+				local stack = info.stackCount
+				if type(stack) ~= "number" or issecretvalue(stack) then
+					stack = 1
+				end
+				if seen[id] then
+					seen[id].count = seen[id].count + stack
+				elseif seen[id] == nil then
+					local item = describe(id)
+					seen[id] = item or false
+					if item then
+						item.count = stack
+						items[#items + 1] = item
+					end
 				end
 			end
 		end
 	end
 	return items
+end
+
+-- Whether the player has any of these buffs: true / false, nil plus the reason when the game hides auras (secret
+-- values in instances and encounters) or the API is missing.
+local function hasBuff(spellIDs)
+	if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
+		return nil, "C_UnitAuras.GetPlayerAuraBySpellID missing"
+	end
+	for _, id in ipairs(spellIDs) do
+		local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, id)
+		if not ok then
+			return nil, "GetPlayerAuraBySpellID failed: " .. tostring(aura)
+		end
+		if issecretvalue(aura) then
+			return nil, "not now: the game hides your buffs here"
+		end
+		if aura then
+			return true
+		end
+	end
+	return false
+end
+
+-- One TSM price in copper, or nil plus why (TSM not loaded, no auction data for the item).
+function ns.price(itemID)
+	if type(TSM_API) ~= "table" or type(TSM_API.GetCustomPriceValue) ~= "function" then
+		return nil, "TSM_API.GetCustomPriceValue missing (TSM not loaded?)"
+	end
+	local ok, value, err = pcall(TSM_API.GetCustomPriceValue, ns.PRICE_SOURCE, "i:" .. itemID)
+	if not ok then
+		return nil, "GetCustomPriceValue failed: " .. tostring(value)
+	end
+	if type(value) ~= "number" then
+		return nil, err or "no auction data"
+	end
+	return value
+end
+
+local function playerLevel()
+	local ok, level = pcall(UnitLevel, "player")
+	if ok and type(level) == "number" and not issecretvalue(level) then
+		return level
+	end
+	return 60
 end
 
 -- The item in an equipment slot and the slot's state: "item", "empty", or "unknown" (an item is there but the
@@ -247,7 +303,20 @@ function ns.gather()
 		mhPoison = Logic.bestPoison(items, set.mainHandPoison),
 		ohPoison = Logic.bestPoison(items, set.offHandPoison),
 	}
-	return fish, poison
+	local fed, whyFed = hasBuff(Logic.FOOD_BUFFS)
+	local elixirUp, whyElixir = hasBuff(Logic.ELIXIR_BUFFS)
+	selftest.buffs = { fed = fed, elixir = elixirUp, why = whyFed or whyElixir }
+	local agility = {
+		unknown = whyFed or whyElixir,
+		fed = fed,
+		elixirUp = elixirUp,
+		food = Logic.bestFood(items),
+		elixir = Logic.bestElixir(items),
+		foodCount = Logic.countOf(items, Logic.foodEntry),
+		elixirCount = Logic.countOf(items, Logic.elixirEntry),
+		lowCount = tonumber(set.lowCount) or Logic.DEFAULTS.lowCount,
+	}
+	return fish, poison, agility
 end
 
 -- ---------------------------------------------------------------------------------------------------------
@@ -283,15 +352,68 @@ local function setGlow(button, on)
 end
 ns.setGlow = setGlow
 
+local function money(copper)
+	if C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString then
+		local ok, text = pcall(C_CurrencyInfo.GetCoinTextureString, copper)
+		if ok and type(text) == "string" then
+			return text
+		end
+	end
+	return string.format("%dg %02ds %02dc", copper / 10000, (copper / 100) % 100, copper % 100)
+end
+
+-- The buy section of the agility tooltip: per missing kind, the strongest you can use with TSM's price, and the
+-- cheapest of the strongest tier on the auction house. Prices are read here, on mouseover only.
+local function addShopping(buy)
+	local level = playerLevel()
+	local tsm = { source = ns.PRICE_SOURCE }
+	for _, kind in ipairs(buy) do
+		local prices = {}
+		local list = kind == "food" and Logic.AGILITY_FOOD or Logic.AGILITY_ELIXIRS
+		for _, e in ipairs(list) do
+			local p, why = ns.price(e.id)
+			prices[e.id] = p
+			tsm.why = tsm.why or (not p and why or nil)
+		end
+		local rows, cheapest = Logic.shoppingList(kind, level, prices, 4)
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddLine(kind == "food" and "Buy agility food:" or "Buy an agility elixir:", 1, 0.82, 0)
+		for _, r in ipairs(rows) do
+			GameTooltip:AddDoubleLine(
+				r.name .. " (+" .. r.agi .. " Agi)",
+				r.price and money(r.price) or "none seen",
+				1,
+				1,
+				1,
+				0.8,
+				0.8,
+				0.8
+			)
+		end
+		if cheapest then
+			GameTooltip:AddLine("Cheapest: " .. cheapest.name .. " at " .. money(cheapest.price), 0.4, 1, 0.4)
+		end
+		tsm[kind] = cheapest and { id = cheapest.id, price = cheapest.price } or false
+	end
+	if tsm.why then
+		GameTooltip:AddLine("Prices: " .. tsm.why, 1, 0.4, 0.4, true)
+	end
+	selftest.tsm = tsm
+end
+
 local function showTooltip(button)
 	local step = button.step
 	if not step then
 		return
 	end
+	button:SetAlpha(1)
 	GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
 	GameTooltip:SetText(button.title)
 	GameTooltip:AddLine(step.label, 1, 1, 1)
 	GameTooltip:AddLine(step.reason, 0.7, 0.7, 0.7, true)
+	if step.buy then
+		addShopping(step.buy)
+	end
 	if not step.macro then
 		GameTooltip:AddLine("Click does nothing right now.", 1, 0.4, 0.4)
 	end
@@ -322,6 +444,7 @@ local function makeButton(name, parent, title, defaultIcon)
 	b:SetScript("OnEnter", showTooltip)
 	b:SetScript("OnLeave", function()
 		GameTooltip:Hide()
+		b:SetAlpha(b.step and b.step.hidden and 0 or 1)
 	end)
 	-- the macro is rewritten right before the click reads it, from the bags as they are now (out of combat only:
 	-- in combat the attributes are locked and the last macro written runs)
@@ -359,7 +482,7 @@ function ns.createUI()
 		return ns.frame
 	end
 	local f = CreateFrame("Frame", "BaitAndBladeFrame", UIParent)
-	f:SetSize(ns.BUTTON_SIZE * 2 + 6, ns.BUTTON_SIZE)
+	f:SetSize(ns.BUTTON_SIZE * 3 + 12, ns.BUTTON_SIZE)
 	f:SetMovable(true)
 	f:SetClampedToScreen(true)
 	local pos = ns.db.position
@@ -373,6 +496,8 @@ function ns.createUI()
 	ns.fishButton:SetPoint("LEFT", f, "LEFT", 0, 0)
 	ns.poisonButton = makeButton("BaitAndBladePoisonButton", f, "Weapons and poisons", ns.POISON_ICON)
 	ns.poisonButton:SetPoint("LEFT", ns.fishButton, "RIGHT", 6, 0)
+	ns.agilityButton = makeButton("BaitAndBladeAgilityButton", f, "Agility food and elixir", ns.AGILITY_ICON)
+	ns.agilityButton:SetPoint("LEFT", ns.poisonButton, "RIGHT", 6, 0)
 	if ns.settings.shown then
 		f:Show()
 	else
@@ -382,6 +507,9 @@ function ns.createUI()
 end
 
 local function iconFor(step, button)
+	if step.shop then
+		return ns.SHOP_ICON
+	end
 	if step.icon and step.icon.id then
 		local tex = C_Item.GetItemIconByID and C_Item.GetItemIconByID(step.icon.id)
 		if tex then
@@ -394,8 +522,12 @@ end
 local function apply(button, step)
 	button.step = step
 	button.icon:SetTexture(iconFor(step, button))
-	button.icon:SetDesaturated(step.macro == nil)
+	button.icon:SetDesaturated(step.macro == nil and not step.shop)
 	setGlow(button, step.glow)
+	-- alpha, not Hide: a secure button can't be hidden in combat, and the mouse must still find it
+	if not (GameTooltip:IsOwned(button) and GameTooltip:IsShown()) then
+		button:SetAlpha(step.hidden and 0 or 1)
+	end
 	if InCombatLockdown() then
 		ns.attributesStale = true
 		counters.deferredInCombat = counters.deferredInCombat + 1
@@ -413,13 +545,46 @@ function ns.refresh()
 		return
 	end
 	counters.refreshes = counters.refreshes + 1
-	local fish, poison = ns.gather()
+	local fish, poison, agility = ns.gather()
 	local fishStep, poisonStep = Logic.fishStep(fish), Logic.poisonStep(poison)
 	apply(ns.fishButton, fishStep)
 	apply(ns.poisonButton, poisonStep)
 	selftest.fish = { label = fishStep.label, reason = fishStep.reason, macro = fishStep.macro, glow = fishStep.glow }
 	selftest.poison =
 		{ label = poisonStep.label, reason = poisonStep.reason, macro = poisonStep.macro, glow = poisonStep.glow }
+	ns.refreshAgility(agility)
+end
+
+-- The agility button: shown when the setting is on (out of combat only: a secure frame), and in combat it keeps
+-- the step it had, since buffs read as secrets there and the macro is locked anyway.
+function ns.refreshAgility(agility)
+	local b = ns.agilityButton
+	if not InCombatLockdown() then
+		if ns.settings.agility then
+			b:Show()
+		else
+			b:Hide()
+		end
+	end
+	if not ns.settings.agility then
+		selftest.agility = { off = true }
+		return
+	end
+	if InCombatLockdown() and b.step then
+		return
+	end
+	local step = Logic.agilityStep(agility)
+	apply(b, step)
+	selftest.agility = {
+		label = step.label,
+		reason = step.reason,
+		macro = step.macro,
+		glow = step.glow,
+		hidden = step.hidden,
+		buy = step.buy,
+		foodCount = agility.foodCount,
+		elixirCount = agility.elixirCount,
+	}
 end
 
 -- One refresh per frame burst: bag and equipment events arrive in clusters.
@@ -451,6 +616,9 @@ function selftest.snapshot(phase)
 		options = selftest.options,
 		fish = selftest.fish,
 		poison = selftest.poison,
+		agility = selftest.agility,
+		buffs = selftest.buffs,
+		tsm = selftest.tsm,
 		enchants = selftest.enchants,
 		hands = selftest.hands,
 		keys = selftest.keys,
@@ -467,6 +635,8 @@ BINDING_HEADER_BAITANDBLADE = "BaitAndBlade"
 for _, k in ipairs(Logic.KEYS) do
 	_G["BINDING_NAME_" .. k.command] = k.label
 end
+-- listed under Keybindings with no default key: the default keys were set once per character already
+_G["BINDING_NAME_CLICK BaitAndBladeAgilityButton:LeftButton"] = "Agility food and elixir button"
 
 -- The character's id for the once-per-character key flag (bindings can be per character). A GUID, not a name.
 local function characterKey()
@@ -596,8 +766,11 @@ function ns.slash(msg)
 			say("fishing: " .. selftest.fish.label .. " (" .. selftest.fish.reason .. ")")
 			say("poisons: " .. selftest.poison.label .. " (" .. selftest.poison.reason .. ")")
 		end
+		if selftest.agility and selftest.agility.label then
+			say("agility: " .. selftest.agility.label .. " (" .. selftest.agility.reason .. ")")
+		end
 		say("/bab show | hide | lock | unlock | weapons (remember equipped) | reset | options")
-		say("macros: /click BaitAndBladeFishButton  and  /click BaitAndBladePoisonButton")
+		say("macros: /click BaitAndBladeFishButton, BaitAndBladePoisonButton, BaitAndBladeAgilityButton")
 	end
 end
 
@@ -624,6 +797,7 @@ for _, e in ipairs({
 	"PLAYER_EQUIPMENT_CHANGED",
 	"WEAPON_ENCHANT_CHANGED",
 	"UNIT_INVENTORY_CHANGED",
+	"UNIT_AURA",
 	"PLAYER_REGEN_ENABLED",
 	"GET_ITEM_INFO_RECEIVED",
 	"PLAYER_LEVEL_UP",
@@ -657,7 +831,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		if ns.keysPending then
 			guard("keys", ns.applyDefaultKeys)
 		end
-	elseif event == "UNIT_INVENTORY_CHANGED" then
+	elseif event == "UNIT_INVENTORY_CHANGED" or event == "UNIT_AURA" then
 		if arg1 == "player" then
 			ns.queueRefresh()
 		end
