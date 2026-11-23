@@ -26,7 +26,7 @@ describe("Core", function()
 	it("keeps the selftest contract", function()
 		ns = mock.loadAddon(".")
 		local st = ns.selftest.snapshot("test")
-		assert.equal("0.3.0", st.version)
+		assert.equal("0.3.1", st.version)
 		assert.equal("1.60.1.70790", st.build)
 		assert.is_table(BaitAndBladeDB.selftest)
 	end)
@@ -95,6 +95,29 @@ describe("Core", function()
 		assert.same({ "stone" }, ns.poisonButton.step.buy)
 		ns.poisonButton._scripts.OnEnter(ns.poisonButton)
 		assert.same({ id = 12404, price = 500 }, ns.selftest.tsm.stone)
+	end)
+
+	it("puts a stone next to the poison, and a poison next to the stone", function()
+		mock.item(12404, { name = "Dense Sharpening Stone", classID = 0, subclassID = 8 })
+		mock.equipped = { [16] = MH, [17] = OH }
+		mock.bag(IP6, CP2, 12404)
+		-- main hand: Instant Poison III only; off hand: a stone only
+		mock.enchant[0] = { { id = 325, type = 3 } }
+		mock.enchant[1] = { { id = 1643, type = 2 } }
+		ns = mock.loadAddon(".")
+		assert.equal("/use Crippling Poison II\n/use 17", macro(ns.poisonButton))
+		mock.enchant[1] = true
+		ns.refresh()
+		assert.equal("/use Dense Sharpening Stone\n/use 16", macro(ns.poisonButton))
+		assert.is_true(ns.poisonButton.glow:IsShown())
+		mock.enchant[0] = { { id = 325, type = 3 }, { id = 1643, type = 2 } }
+		ns.refresh()
+		assert.equal("", macro(ns.poisonButton))
+		-- stones switched off: a poison alone is done
+		ns = mock.loadAddon(".", { settings = { stones = false } })
+		mock.enchant[0] = { { id = 325, type = 3 } }
+		ns.refresh()
+		assert.equal("", macro(ns.poisonButton))
 	end)
 
 	it("goes quiet on a flight path: no macro, no glow, no buy reminder", function()

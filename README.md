@@ -16,7 +16,7 @@ A WoW: Forever addon for rogues who fish. It puts three buttons on screen. Each 
 
 The button glows while your weapons are on and either hand has no poison. Defaults: Instant Poison on the main hand, Crippling Poison on the off hand. Only ranks you can use count.
 
-Either hand can take a sharpening stone instead (Options: "Sharpening Stone"). The button then puts your best stone on it: Elemental, Dense, Solid, Heavy, Coarse, Rough. A weapon holds one poison or one stone at a time. With no stones left, the tooltip lists the ones you can use and TSM's price for each.
+A weapon on Forever holds a poison and a sharpening stone at the same time, so after the poisons the button puts your best stone on each hand: Elemental, Dense, Solid, Heavy, Coarse, Rough. Options: "Sharpening stones too" switches the stones off; a hand set to "Sharpening Stone" gets a stone and no poison. With no stones left, the tooltip lists the ones you can use and TSM's price for each.
 
 On a flight path all three buttons go quiet (no glow, no click, no buy reminder) until you land.
 

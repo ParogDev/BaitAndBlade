@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- A weapon on Forever holds a poison and a sharpening stone at the same time, so the weapons button now puts both on each hand: poisons first, then your best stone. Before, a stone counted as the poison and a poison as the stone.
+- New option "Sharpening stones too" (on by default). Switch it off for poisons only. A hand set to Sharpening Stone still gets a stone and no poison.
+- A hand with the wrong poison family on it gets its own poison again. The tooltip names the one that is on.
+
 ## 0.3.0
 
 - Sharpening stones: each hand's choice in Options can now be Sharpening Stone instead of a poison. The weapons button then puts your best stone on that hand (Elemental before Dense before Solid and so on). A weapon holds one poison or one stone at a time.

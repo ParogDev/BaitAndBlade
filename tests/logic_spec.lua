@@ -100,6 +100,8 @@ describe("Logic.poisonStep", function()
 			haveOH = true,
 			mhPoisoned = true,
 			ohPoisoned = true,
+			mhStoned = true,
+			ohStoned = true,
 			mhFamily = "Instant Poison",
 			ohFamily = "Crippling Poison",
 			mhPoison = item(8928, "Instant Poison VI"),
@@ -155,16 +157,36 @@ describe("Logic.poisonStep", function()
 		assert.matches("Sword of Omen", s.reason)
 	end)
 
-	it("puts a sharpening stone on a hand set to stones", function()
-		base.ohFamily, base.ohPoisoned = Logic.STONE, false
-		base.ohPoison = item(12404, "Dense Sharpening Stone")
+	local P, S = Logic.ENCHANT_IMBUE, Logic.ENCHANT_TEMPORARY
+	local dense = item(12404, "Dense Sharpening Stone")
+
+	it("stones a poisoned hand that has no stone", function()
+		base.stone, base.ohStoned = dense, false
 		local s = Logic.poisonStep(base)
 		assert.equal("/use Dense Sharpening Stone\n/use 17", s.macro)
-		assert.matches("sharpening stone", s.reason)
+		assert.equal("off hand has no sharpening stone", s.reason)
+		assert.is_true(s.glow)
 	end)
 
-	it("asks to buy stones when a stone hand has none", function()
-		base.ohFamily, base.ohPoisoned, base.ohPoison = Logic.STONE, false, nil
+	it("poisons a stoned hand that has no poison, before any stone", function()
+		base.stone, base.mhStoned = dense, false
+		base.ohPoisoned = false
+		local s = Logic.poisonStep(base)
+		assert.equal("/use Crippling Poison II\n/use 17", s.macro)
+		base.ohPoisoned = true
+		s = Logic.poisonStep(base)
+		assert.equal("/use Dense Sharpening Stone\n/use 16", s.macro)
+	end)
+
+	it("re-poisons a hand with another poison family on it", function()
+		base.mhPoisoned, base.mhOn = Logic.handState({ { id = 22, type = P } }, "Instant Poison", true)
+		local s = Logic.poisonStep(base)
+		assert.equal("/use Instant Poison VI\n/use 16", s.macro)
+		assert.equal("main hand has Crippling Poison, set to another poison", s.reason)
+	end)
+
+	it("asks to buy stones when a hand lacks one and the bags have none", function()
+		base.ohStoned, base.stone = false, nil
 		local s = Logic.poisonStep(base)
 		assert.is_nil(s.macro)
 		assert.equal("Out of sharpening stones", s.label)
@@ -173,6 +195,26 @@ describe("Logic.poisonStep", function()
 		s = Logic.poisonStep(base)
 		assert.equal("Out of poison", s.label)
 		assert.same({ "stone" }, s.buy)
+	end)
+
+	it("reads a poison and a stone on one weapon (the reading from the game)", function()
+		local both = { { id = 1643, type = S }, { id = 325, type = P } }
+		assert.same({ true, nil, true }, { Logic.handState(both, "Instant Poison", true) })
+		-- the stone alone does not count as the poison, nor the poison as the stone
+		assert.same({ false, nil, true }, { Logic.handState({ both[1] }, "Instant Poison", true) })
+		assert.same({ true, nil, false }, { Logic.handState({ both[2] }, "Instant Poison", true) })
+	end)
+
+	it("stone-only hands want no poison, and stones off want no stone", function()
+		assert.same({ true, nil, false }, { Logic.handState({ { id = 22, type = P } }, Logic.STONE, false) })
+		assert.same({ false, nil, true }, { Logic.handState({}, "Instant Poison", false) })
+		assert.same({ true, nil, true }, { Logic.handState({ { id = 2506, type = S } }, Logic.STONE, true) })
+		assert.is_nil(Logic.handState(nil, "Instant Poison", true))
+	end)
+
+	it("an enchant the table does not know fills its slot", function()
+		local odd = { { id = 99999, type = S }, { id = 99998, type = P } }
+		assert.same({ true, nil, true }, { Logic.handState(odd, "Wound Poison", true) })
 	end)
 
 	it("does not glow when the poison state is hidden", function()
@@ -264,9 +306,11 @@ describe("Logic sharpening stones", function()
 		local dense = item(12404, "Dense Sharpening Stone")
 		local copy = item(287980, "Elemental Sharpening Stone")
 		local solid = item(7964, "Solid Sharpening Stone")
-		assert.equal(dense, Logic.bestFor({ solid, dense }, Logic.STONE))
-		assert.equal(copy, Logic.bestFor({ solid, dense, copy }, Logic.STONE))
-		assert.is_nil(Logic.bestFor({ item(23122, "Consecrated Sharpening Stone") }, Logic.STONE))
+		assert.equal(dense, Logic.bestStone({ solid, dense }))
+		assert.equal(copy, Logic.bestStone({ solid, dense, copy }))
+		assert.is_nil(Logic.bestStone({ item(23122, "Consecrated Sharpening Stone") }))
+		-- a stone-only hand takes no poison: its stone comes from bestStone
+		assert.is_nil(Logic.bestFor({ dense }, Logic.STONE))
 		assert.is_nil(Logic.bestFor({ solid }, "Instant Poison"))
 	end)
 

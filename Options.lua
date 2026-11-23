@@ -49,17 +49,22 @@ function Options.register()
 
 	Settings.CreateDropdown(
 		category,
-		addon("mainHandPoison", "String", "Main hand poison or stone"),
+		addon("mainHandPoison", "String", "Main hand poison"),
 		poisonChoices,
-		"What the button puts on the main hand: the highest rank of the poison in your bags that you can use, or "
-			.. "your best sharpening stone. A weapon holds one of them at a time."
+		"The poison the button puts on the main hand: the highest rank in your bags that you can use. "
+			.. "Sharpening Stone means no poison on this hand, only a stone."
 	)
 	Settings.CreateDropdown(
 		category,
-		addon("offHandPoison", "String", "Off hand poison or stone"),
+		addon("offHandPoison", "String", "Off hand poison"),
 		poisonChoices,
-		"What the button puts on the off hand: the highest rank of the poison in your bags that you can use, or "
-			.. "your best sharpening stone. A weapon holds one of them at a time."
+		"The poison the button puts on the off hand: the highest rank in your bags that you can use. "
+			.. "Sharpening Stone means no poison on this hand, only a stone."
+	)
+	Settings.CreateCheckbox(
+		category,
+		addon("stones", "Boolean", "Sharpening stones too"),
+		"Also put your best sharpening stone on both weapons. A weapon holds a poison and a stone at the same time."
 	)
 
 	if layout and CreateSettingsButtonInitializer then
