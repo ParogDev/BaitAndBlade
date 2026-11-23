@@ -7,7 +7,7 @@ BaitAndBlade = ns
 
 local Logic = ns.Logic
 
-ns.VERSION = "0.1.1"
+ns.VERSION = "0.1.2"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
 ns.POISON_ICON = 132273 -- Ability_Poisons
@@ -452,10 +452,45 @@ function selftest.snapshot(phase)
 		fish = selftest.fish,
 		poison = selftest.poison,
 		enchants = selftest.enchants,
+		hands = selftest.hands,
+		keys = selftest.keys,
 		counters = counters,
 		lastError = selftest.lastError,
 	}
 	return ns.db.selftest
+end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Key bindings (Bindings.xml lists them under Options > Keybindings > BaitAndBlade)
+-- ---------------------------------------------------------------------------------------------------------
+BINDING_HEADER_BAITANDBLADE = "BaitAndBlade"
+for _, k in ipairs(Logic.KEYS) do
+	_G["BINDING_NAME_" .. k.command] = k.label
+end
+
+-- Sets the default keys once per character, out of combat. A key the player bound to something else, or a button
+-- the player already gave another key, is left alone and named in chat.
+function ns.applyDefaultKeys()
+	if ns.db.keysApplied or InCombatLockdown() then
+		return
+	end
+	local result, changed = {}, false
+	for _, k in ipairs(Logic.KEYS) do
+		local plan = Logic.keyPlan(GetBindingAction(k.key), k.command, GetBindingKey(k.command) ~= nil)
+		if plan == "set" then
+			changed = SetBinding(k.key, k.command) or changed
+		elseif plan == "taken" then
+			local line = "%s is already bound to %s: bind the %s in Options > Keybindings."
+			say(line:format(k.key, GetBindingAction(k.key), k.label))
+		end
+		result[k.key] = plan
+	end
+	if changed then
+		SaveBindings(GetCurrentBindingSet())
+		say("keys set: SHIFT-` fishing, CTRL-` weapons and poisons (change them in Options > Keybindings).")
+	end
+	ns.db.keysApplied = true
+	selftest.keys = result
 end
 
 -- ---------------------------------------------------------------------------------------------------------
@@ -573,6 +608,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 			guard("options", ns.Options.register)
 		end
 		guard("refresh", ns.refresh)
+		guard("keys", ns.applyDefaultKeys)
 		guard("snapshot", selftest.snapshot, "login")
 	elseif event == "PLAYER_LOGOUT" then
 		guard("snapshot", selftest.snapshot, "logout")

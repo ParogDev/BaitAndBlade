@@ -160,6 +160,31 @@ function M.install()
 		end,
 	}
 	_G.Settings = nil
+	M.bindings = {} -- key -> command
+	M.saved = 0
+	_G.GetBindingAction = function(key)
+		return M.bindings[key] or ""
+	end
+	_G.GetBindingKey = function(command)
+		for k, c in pairs(M.bindings) do
+			if c == command then
+				return k
+			end
+		end
+	end
+	_G.SetBinding = function(key, command)
+		if M.inCombat then
+			error("SetBinding in combat")
+		end
+		M.bindings[key] = command
+		return true
+	end
+	_G.SaveBindings = function()
+		M.saved = M.saved + 1
+	end
+	_G.GetCurrentBindingSet = function()
+		return 2
+	end
 end
 
 function M.item(id, fields)
