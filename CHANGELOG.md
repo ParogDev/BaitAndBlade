@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Key bindings: both buttons are listed under Options > Keybindings > BaitAndBlade. On the first login the addon binds SHIFT-` to the fishing button and CTRL-` to the weapons button, only where the key is free. After that your own changes stick.
+
 ## 0.1.1
 
 - An empty off hand (two-hander set up) no longer counts as unpoisoned.

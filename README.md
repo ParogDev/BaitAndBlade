@@ -21,7 +21,7 @@ The button glows while your weapons are on and either hand has no poison. Defaul
 - Options > AddOns > BaitAndBlade: poison per hand, cast and glow toggles, lock.
 - Hold your normal weapons and press **Use equipped** there (or type `/bab weapons`) to set the weapons the button equips.
 - Shift-drag a button to move both.
-- For key bindings, make macros: `/click BaitAndBladeFishButton` and `/click BaitAndBladePoisonButton`.
+- Keys: SHIFT-` clicks the fishing button and CTRL-` the weapons button, set on the first login where the key is free. Change them under Options > Keybindings > BaitAndBlade. Macros work too: `/click BaitAndBladeFishButton` and `/click BaitAndBladePoisonButton`.
 
 In combat the buttons keep the step they had when combat started: the game locks secure buttons in combat.
 

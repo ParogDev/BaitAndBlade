@@ -1,0 +1,4 @@
+<Bindings>
+	<Binding name="CLICK BaitAndBladeFishButton:LeftButton" header="BAITANDBLADE"/>
+	<Binding name="CLICK BaitAndBladePoisonButton:LeftButton"/>
+</Bindings>

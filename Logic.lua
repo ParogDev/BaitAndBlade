@@ -24,6 +24,28 @@ Logic.DEFAULTS = {
 	shown = true,
 }
 
+-- Default keys, set once (only on a key that is free or already ours) and then left to Options > Keybindings.
+Logic.KEYS = {
+	{ key = "SHIFT-`", command = "CLICK BaitAndBladeFishButton:LeftButton", label = "Fishing button" },
+	{ key = "CTRL-`", command = "CLICK BaitAndBladePoisonButton:LeftButton", label = "Weapons and poisons button" },
+}
+
+-- What to do with one default key: "set", "ours" (already bound to it) or "taken" (the player bound it to
+-- something else: never overwritten) or "kept" (the command already has another key: the player chose it).
+-- bound is GetBindingAction(key); commandHasKey whether GetBindingKey(command) gives any key.
+function Logic.keyPlan(bound, command, commandHasKey)
+	if bound == command then
+		return "ours"
+	end
+	if commandHasKey then
+		return "kept"
+	end
+	if bound == nil or bound == "" then
+		return "set"
+	end
+	return "taken"
+end
+
 -- Fishing lures by item id, then by name (a Forever item id that differs still matches by name): skill bonus.
 Logic.LURES_BY_ID = {
 	[6529] = 25, -- Shiny Bauble
