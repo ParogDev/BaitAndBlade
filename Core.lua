@@ -468,28 +468,63 @@ for _, k in ipairs(Logic.KEYS) do
 	_G["BINDING_NAME_" .. k.command] = k.label
 end
 
--- Sets the default keys once per character, out of combat. A key the player bound to something else, or a button
--- the player already gave another key, is left alone and named in chat.
+-- The character's id for the once-per-character key flag (bindings can be per character). A GUID, not a name.
+local function characterKey()
+	local ok, guid = pcall(UnitGUID, "player")
+	if ok and type(guid) == "string" and not issecretvalue(guid) then
+		return guid
+	end
+	return nil
+end
+
+-- One default key: its plan, and for "set" whether SetBinding took it ("set" / "failed").
+local function applyKey(k)
+	local bound = GetBindingAction(k.key)
+	if type(bound) ~= "string" or issecretvalue(bound) then
+		return "unreadable"
+	end
+	local plan = Logic.keyPlan(bound, k.command, GetBindingKey(k.command) ~= nil)
+	if plan == "set" then
+		return SetBinding(k.key, k.command) and "set" or "failed"
+	elseif plan == "taken" then
+		local line = "%s is already bound to %s: bind the %s in Options > Keybindings."
+		say(line:format(k.key, bound, k.label))
+	end
+	return plan
+end
+
+-- Sets the default keys once per character, out of combat (retried after combat). A key the player bound to
+-- something else, or a button the player already gave another key, is left alone and named in chat. A key that
+-- failed to set leaves the flag unset, so the next login tries again.
 function ns.applyDefaultKeys()
-	if ns.db.keysApplied or InCombatLockdown() then
+	local who = characterKey()
+	ns.db.keysApplied = type(ns.db.keysApplied) == "table" and ns.db.keysApplied or {}
+	if not who or ns.db.keysApplied[who] then
 		return
 	end
-	local result, changed = {}, false
+	if InCombatLockdown() then
+		ns.keysPending = true
+		return
+	end
+	ns.keysPending = false
+	local result, set, done = {}, {}, true
 	for _, k in ipairs(Logic.KEYS) do
-		local plan = Logic.keyPlan(GetBindingAction(k.key), k.command, GetBindingKey(k.command) ~= nil)
-		if plan == "set" then
-			changed = SetBinding(k.key, k.command) or changed
-		elseif plan == "taken" then
-			local line = "%s is already bound to %s: bind the %s in Options > Keybindings."
-			say(line:format(k.key, GetBindingAction(k.key), k.label))
+		local ok, outcome = pcall(applyKey, k)
+		outcome = ok and outcome or ("error: " .. tostring(outcome))
+		result[k.key] = outcome
+		if outcome == "set" then
+			set[#set + 1] = k.key .. " " .. k.label
+		elseif outcome ~= "ours" and outcome ~= "kept" and outcome ~= "taken" then
+			done = false
 		end
-		result[k.key] = plan
 	end
-	if changed then
+	if #set > 0 then
 		SaveBindings(GetCurrentBindingSet())
-		say("keys set: SHIFT-` fishing, CTRL-` weapons and poisons (change them in Options > Keybindings).")
+		say("keys set: " .. table.concat(set, ", ") .. " (change them in Options > Keybindings).")
 	end
-	ns.db.keysApplied = true
+	if done then
+		ns.db.keysApplied[who] = true
+	end
 	selftest.keys = result
 end
 
@@ -619,6 +654,9 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		end
 		ns.attributesStale = false
 		ns.queueRefresh()
+		if ns.keysPending then
+			guard("keys", ns.applyDefaultKeys)
+		end
 	elseif event == "UNIT_INVENTORY_CHANGED" then
 		if arg1 == "player" then
 			ns.queueRefresh()

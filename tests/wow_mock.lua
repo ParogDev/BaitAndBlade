@@ -162,6 +162,7 @@ function M.install()
 	_G.Settings = nil
 	M.bindings = {} -- key -> command
 	M.saved = 0
+	M.setBindingFails = false
 	_G.GetBindingAction = function(key)
 		return M.bindings[key] or ""
 	end
@@ -176,8 +177,14 @@ function M.install()
 		if M.inCombat then
 			error("SetBinding in combat")
 		end
+		if M.setBindingFails then
+			return false
+		end
 		M.bindings[key] = command
 		return true
+	end
+	_G.UnitGUID = function()
+		return "Player-1-ABC"
 	end
 	_G.SaveBindings = function()
 		M.saved = M.saved + 1

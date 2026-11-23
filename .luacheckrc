@@ -12,7 +12,7 @@ ignore = {
 local client = {
 	"CreateFrame", "C_AddOns", "C_Item", "C_Container", "C_Spell", "C_Timer", "GetBuildInfo", "GetInventoryItemID",
 	"InCombatLockdown", "IsShiftKeyDown", "WOW_PROJECT_ID", "issecretvalue", "date", "strtrim", "Enum",
-	"GetBindingAction", "GetBindingKey", "SetBinding", "SaveBindings", "GetCurrentBindingSet",
+	"GetBindingAction", "GetBindingKey", "SetBinding", "SaveBindings", "GetCurrentBindingSet", "UnitGUID",
 }
 -- FrameXML globals the generated list may not carry.
 local framexml = {

@@ -155,13 +155,36 @@ describe("Core", function()
 		assert.equal("set", ns.selftest.keys["SHIFT-`"])
 		assert.equal("taken", ns.selftest.keys["CTRL-`"])
 		assert.equal(1, mock.saved)
-		assert.is_true(BaitAndBladeDB.keysApplied)
+		assert.is_true(BaitAndBladeDB.keysApplied["Player-1-ABC"])
+		assert.matches("SHIFT%-` Fishing button", mock.chat[#mock.chat])
+		assert.not_matches("CTRL", mock.chat[#mock.chat])
 	end)
 
-	it("leaves keys alone once applied, so a player's change sticks", function()
-		ns = mock.loadAddon(".", { keysApplied = true })
+	it("leaves keys alone once applied for this character, so a player's change sticks", function()
+		ns = mock.loadAddon(".", { keysApplied = { ["Player-1-ABC"] = true } })
 		assert.is_nil(mock.bindings["SHIFT-`"])
 		assert.equal(0, mock.saved)
+	end)
+
+	it("sets the keys for a second character", function()
+		ns = mock.loadAddon(".", { keysApplied = { ["Player-1-OTHER"] = true } })
+		assert.equal("CLICK BaitAndBladeFishButton:LeftButton", mock.bindings["SHIFT-`"])
+	end)
+
+	it("tries again next login when a key fails to set", function()
+		mock.setBindingFails = true
+		ns = mock.loadAddon(".")
+		assert.equal("failed", ns.selftest.keys["SHIFT-`"])
+		assert.is_nil(BaitAndBladeDB.keysApplied["Player-1-ABC"])
+	end)
+
+	it("waits for the end of combat to set the keys", function()
+		mock.inCombat = true
+		ns = mock.loadAddon(".")
+		assert.is_nil(mock.bindings["SHIFT-`"])
+		mock.inCombat = false
+		mock.fire("PLAYER_REGEN_ENABLED")
+		assert.equal("CLICK BaitAndBladeFishButton:LeftButton", mock.bindings["SHIFT-`"])
 	end)
 
 	it("remembers the equipped weapons", function()
