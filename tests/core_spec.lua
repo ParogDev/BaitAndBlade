@@ -26,7 +26,7 @@ describe("Core", function()
 	it("keeps the selftest contract", function()
 		ns = mock.loadAddon(".")
 		local st = ns.selftest.snapshot("test")
-		assert.equal("0.1.0", st.version)
+		assert.equal("0.1.1", st.version)
 		assert.equal("1.60.1.70790", st.build)
 		assert.is_table(BaitAndBladeDB.selftest)
 	end)
@@ -102,6 +102,33 @@ describe("Core", function()
 		assert.equal("", macro(ns.poisonButton))
 		assert.is_false(ns.poisonButton.glow:IsShown())
 		assert.equal("secret", ns.selftest.enchants.mainHand)
+	end)
+
+	it("treats an empty off hand as nothing to poison (two-hander set up)", function()
+		mock.item(301, { name = "Big Axe", classID = 2, subclassID = 1 })
+		mock.equipped = { [16] = 301 }
+		mock.enchant[0] = true
+		mock.bag(IP6, CP2)
+		ns = mock.loadAddon(".", { settings = { mainHandWeapon = "Big Axe", offHandWeapon = "" } })
+		assert.equal("", macro(ns.poisonButton))
+		assert.is_false(ns.poisonButton.glow:IsShown())
+	end)
+
+	it("swaps hands instead of calling the weapons missing", function()
+		mock.equipped = { [16] = OH, [17] = MH }
+		mock.bag(IP6, CP2)
+		ns = mock.loadAddon(".")
+		assert.equal("/equipslot 16 Dazzling Longsword\n/equipslot 17 Sword of Omen", macro(ns.poisonButton))
+	end)
+
+	it("decides nothing while an equipped item's info is not loaded", function()
+		mock.equipped = { [16] = 999, [17] = OH } -- 999: no item info yet
+		mock.bag(POLE, LURE, IP6, CP2)
+		ns = mock.loadAddon(".")
+		assert.equal("", macro(ns.poisonButton))
+		assert.equal("", macro(ns.fishButton))
+		assert.equal("Loading", ns.selftest.poison.label)
+		assert.is_false(ns.poisonButton.glow:IsShown())
 	end)
 
 	it("remembers the equipped weapons", function()
