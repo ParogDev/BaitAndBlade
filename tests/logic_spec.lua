@@ -175,6 +175,37 @@ describe("Logic.poisonStep", function()
 		assert.same({ "stone" }, s.buy)
 	end)
 
+	it("re-stones a stone hand that has a poison on it", function()
+		base.ohFamily, base.ohPoison = Logic.STONE, item(12404, "Dense Sharpening Stone")
+		base.ohPoisoned, base.ohOn = Logic.handDone({ 22 }, Logic.STONE)
+		assert.is_false(base.ohPoisoned)
+		local s = Logic.poisonStep(base)
+		assert.equal("/use Dense Sharpening Stone\n/use 17", s.macro)
+		assert.equal("off hand has Crippling Poison, set to sharpening stone", s.reason)
+		assert.is_true(s.glow)
+	end)
+
+	it("re-poisons a poison hand that has a stone on it", function()
+		base.mhPoisoned, base.mhOn = Logic.handDone({ 1643 }, "Instant Poison")
+		local s = Logic.poisonStep(base)
+		assert.equal("/use Instant Poison VI\n/use 16", s.macro)
+		assert.equal("main hand has a sharpening stone, set to poison", s.reason)
+	end)
+
+	it("wants the chosen poison family, not any poison", function()
+		assert.same({ false, "Crippling Poison" }, { Logic.handDone({ 22 }, "Instant Poison") })
+	end)
+
+	it("judges hands from the enchant ids", function()
+		assert.is_true(Logic.handDone({ 325 }, "Instant Poison"))
+		assert.is_true(Logic.handDone({ 2506 }, Logic.STONE))
+		assert.same({ false }, { Logic.handDone({}, "Instant Poison") })
+		assert.is_nil(Logic.handDone(nil, "Instant Poison"))
+		-- unknown enchant, or a choice the table cannot judge: counts as done
+		assert.is_true(Logic.handDone({ 99999 }, Logic.STONE))
+		assert.is_true(Logic.handDone({ 22 }, ""))
+	end)
+
 	it("does not glow when the poison state is hidden", function()
 		base.mhPoisoned = nil
 		local s = Logic.poisonStep(base)

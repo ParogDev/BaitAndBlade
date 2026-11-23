@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- The weapons button now checks which enchant a hand carries, not just that it has one. A hand set to Sharpening Stone with a poison on it gets its stone. A hand set to a poison with a stone or another poison family on it gets its poison. The tooltip says what is on the hand instead.
+
 ## 0.3.0
 
 - Sharpening stones: each hand's choice in Options can now be Sharpening Stone instead of a poison. The weapons button then puts your best stone on that hand (Elemental before Dense before Solid and so on). A weapon holds one poison or one stone at a time.

@@ -96,6 +96,46 @@ local FOOD_BY_ID, FOOD_BY_NAME = index(Logic.AGILITY_FOOD)
 local ELIXIR_BY_ID, ELIXIR_BY_NAME = index(Logic.AGILITY_ELIXIRS)
 local STONE_BY_ID, STONE_BY_NAME = index(Logic.SHARPENING_STONES)
 
+-- Which hand choice a temporary weapon enchant belongs to, by SpellItemEnchantment id, from the Forever client's
+-- table (build 1.60.1.71037): each poison family's ranks, and the sharpening stones ("Sharpened +2" to "+8" and the
+-- Elemental stone's "Critical +2%"). A hand set to one choice is not done while the other kind is on it.
+Logic.ENCHANT_KIND = {}
+for kind, ids in pairs({
+	["Instant Poison"] = { 323, 324, 325, 623, 624, 625 },
+	["Deadly Poison"] = { 7, 8, 626, 627, 2630 },
+	["Crippling Poison"] = { 22, 603 },
+	["Mind-numbing Poison"] = { 35, 23, 643 },
+	["Wound Poison"] = { 703, 704, 705, 706 },
+	[Logic.STONE] = { 40, 13, 14, 483, 1643, 2506 },
+}) do
+	for _, id in ipairs(ids) do
+		Logic.ENCHANT_KIND[id] = kind
+	end
+end
+-- the choices the table can judge; any other setting (empty, a family it lacks) takes whatever is on
+Logic.ENCHANT_KIND_CHOICE = {}
+for _, kind in pairs(Logic.ENCHANT_KIND) do
+	Logic.ENCHANT_KIND_CHOICE[kind] = true
+end
+
+-- Whether a hand carries what it is set to. ids: the temporary enchant ids on it (nil when the game hides them).
+-- Returns done (true / false / nil) and, when not done, the kind that is on it instead (nil for a bare weapon).
+-- An enchant this table does not know (a new rank, an oil) counts as done: better quiet than a wrong nag.
+function Logic.handDone(ids, choice)
+	if ids == nil then
+		return nil
+	end
+	local other
+	for _, id in ipairs(ids) do
+		local kind = Logic.ENCHANT_KIND[id]
+		if kind == nil or kind == choice or Logic.ENCHANT_KIND_CHOICE[choice] == nil then
+			return true
+		end
+		other = other or kind
+	end
+	return false, other
+end
+
 function Logic.stoneEntry(item)
 	return STONE_BY_ID[item.id] or STONE_BY_NAME[item.name]
 end
@@ -365,7 +405,8 @@ end
 -- What the poison button does next.
 -- s.mhName, s.ohName: the equipped weapons' names; s.wantMH, s.wantOH: the configured ones ("" = don't care)
 -- s.haveMH, s.haveOH: the configured weapon is in the bags (or equipped)
--- s.mhPoisoned, s.ohPoisoned: true / false, nil when unknown (secret)
+-- s.mhPoisoned, s.ohPoisoned: the hand carries its chosen poison or stone: true / false, nil when unknown (secret)
+-- s.mhOn, s.ohOn: when not, the other kind on it (a poison on a stone hand, a stone on a poison hand), or nil
 -- s.mhPoison, s.ohPoison: the best poison of each hand's family in the bags; s.mhFamily, s.ohFamily: their names
 function Logic.poisonStep(s)
 	if s.unknown then
@@ -402,12 +443,20 @@ function Logic.poisonStep(s)
 		return { label = "Poisons", reason = "poison state unknown (the game hides it here)" }
 	end
 	local glow = not s.mhPoisoned or not s.ohPoisoned
-	-- mhPoisoned / ohPoisoned mean "carries a temporary enchant": a poison or a sharpening stone
+	-- mhPoisoned / ohPoisoned mean "carries the poison or stone it is set to"; the newest temporary enchant replaces
+	-- the old one, so a hand with the other kind on it gets the same click
+	local function lacks(hand, family, on)
+		local want = family == Logic.STONE and "sharpening stone" or "poison"
+		if on then
+			return hand .. " has " .. (on == Logic.STONE and "a sharpening stone" or on) .. ", set to " .. want
+		end
+		return hand .. " has no " .. want
+	end
 	if not s.mhPoisoned and s.mhPoison then
 		return {
 			macro = useLine(s.mhPoison) .. "\n/use 16",
 			label = "Main hand: " .. s.mhPoison.name,
-			reason = "main hand has no " .. (s.mhFamily == Logic.STONE and "sharpening stone" or "poison"),
+			reason = lacks("main hand", s.mhFamily, s.mhOn),
 			glow = true,
 			icon = s.mhPoison,
 		}
@@ -416,7 +465,7 @@ function Logic.poisonStep(s)
 		return {
 			macro = useLine(s.ohPoison) .. "\n/use 17",
 			label = "Off hand: " .. s.ohPoison.name,
-			reason = "off hand has no " .. (s.ohFamily == Logic.STONE and "sharpening stone" or "poison"),
+			reason = lacks("off hand", s.ohFamily, s.ohOn),
 			glow = true,
 			icon = s.ohPoison,
 		}
