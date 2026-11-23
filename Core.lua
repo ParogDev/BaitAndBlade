@@ -7,7 +7,7 @@ BaitAndBlade = ns
 
 local Logic = ns.Logic
 
-ns.VERSION = "0.3.0"
+ns.VERSION = "0.3.1"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
 ns.POISON_ICON = 132273 -- Ability_Poisons
@@ -190,7 +190,8 @@ local function equipped(slot)
 	return item, "item"
 end
 
--- The temporary enchant ids on a weapon slot (poison, stone, lure; {} for none), nil when the client hides them.
+-- The non-permanent enchants on a weapon slot as { id =, type = } (poison, stone, lure; {} for none), nil when the
+-- client hides them.
 -- The raw answer goes into selftest.enchants so a wrong reading can be told from a wrong rule.
 local function tempEnchant(weaponSlot, label)
 	if not (C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot) then
@@ -209,7 +210,7 @@ local function tempEnchant(weaponSlot, label)
 	end
 	local permanent = Enum.ItemEnchantType and Enum.ItemEnchantType.Permanent or 1
 	local raw = {}
-	local ids = {}
+	local list = {}
 	for _, e in pairs(enchants) do
 		if type(e) == "table" then
 			if issecretvalue(e.hasEnchant) or issecretvalue(e.enchantType) or issecretvalue(e.enchantID) then
@@ -218,12 +219,12 @@ local function tempEnchant(weaponSlot, label)
 			end
 			raw[#raw + 1] = { has = e.hasEnchant, type = e.enchantType, id = e.enchantID }
 			if e.hasEnchant and e.enchantType ~= permanent then
-				ids[#ids + 1] = e.enchantID or 0
+				list[#list + 1] = { id = e.enchantID or 0, type = e.enchantType }
 			end
 		end
 	end
 	selftest.enchants[label] = raw
-	return ids
+	return list
 end
 
 local function fishingSpellName()
@@ -258,21 +259,22 @@ function ns.gather()
 	selftest.enchants = {}
 	-- A hand with no weapon in it has nothing to poison: it counts as done (an equip step comes first when a
 	-- weapon is wanted there). Not `x and f() or false`: f() returning nil (hidden) must stay nil.
-	local mhEnchant, ohEnchant = true, true
-	-- mhAny: any temporary enchant on the main hand (a lure on the pole), kept apart from "the chosen one is on"
+	local mhEnchant, ohEnchant, mhStoned, ohStoned = true, true, true, true
+	-- mhAny: any non-permanent enchant on the main hand (a lure on the pole)
 	local mhOn, ohOn
 	local mhAny = true
+	local wantStone = set.stones ~= false
 	if mh and mh.classID == Logic.WEAPON_CLASS then
-		local ids = tempEnchant(mhSlot, "mainHand")
-		mhEnchant, mhOn = Logic.handDone(ids, set.mainHandPoison)
-		if ids == nil then
+		local list = tempEnchant(mhSlot, "mainHand")
+		mhEnchant, mhOn, mhStoned = Logic.handState(list, set.mainHandPoison, wantStone)
+		if list == nil then
 			mhAny = nil
 		else
-			mhAny = #ids > 0
+			mhAny = #list > 0
 		end
 	end
 	if oh and oh.classID == Logic.WEAPON_CLASS then
-		ohEnchant, ohOn = Logic.handDone(tempEnchant(ohSlot, "offHand"), set.offHandPoison)
+		ohEnchant, ohOn, ohStoned = Logic.handState(tempEnchant(ohSlot, "offHand"), set.offHandPoison, wantStone)
 	end
 	-- a wanted weapon can be in the bags or already on either hand (swapped hands: /equipslot moves it)
 	local function have(name)
@@ -309,6 +311,9 @@ function ns.gather()
 		ohPoisoned = ohEnchant,
 		mhOn = mhOn,
 		ohOn = ohOn,
+		mhStoned = mhStoned,
+		ohStoned = ohStoned,
+		stone = Logic.bestStone(items),
 		mhFamily = set.mainHandPoison,
 		ohFamily = set.offHandPoison,
 		mhPoison = Logic.bestFor(items, set.mainHandPoison),

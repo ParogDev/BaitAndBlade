@@ -147,8 +147,18 @@ function M.install()
 				M.secret[v] = true
 				return { { hasEnchant = v, enchantType = 2 } }
 			end
-			if e then
-				return { { hasEnchant = true, enchantType = 2, timeLeft = 1800000, charges = 0, enchantID = 1 } }
+			-- true: what the game reported for a done weapon, a stone (Temporary, 2) next to a poison (Imbue, 3), the
+			-- poison under an id the addon's table does not know; a table: those { id =, type = } entries
+			if e == true then
+				e = { { id = 1643, type = 2 }, { id = 1, type = 3 } }
+			end
+			if type(e) == "table" then
+				local list = {}
+				for i, x in ipairs(e) do
+					list[i] =
+						{ hasEnchant = true, enchantType = x.type, timeLeft = 1800000, charges = 0, enchantID = x.id }
+				end
+				return list
 			end
 			return { { hasEnchant = false, enchantType = 0, timeLeft = 0, charges = 0, enchantID = 0 } }
 		end,

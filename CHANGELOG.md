@@ -2,7 +2,9 @@
 
 ## 0.3.1
 
-- The weapons button now checks which enchant a hand carries, not just that it has one. A hand set to Sharpening Stone with a poison on it gets its stone. A hand set to a poison with a stone or another poison family on it gets its poison. The tooltip says what is on the hand instead.
+- A weapon on Forever holds a poison and a sharpening stone at the same time, so the weapons button now puts both on each hand: poisons first, then your best stone. Before, a stone counted as the poison and a poison as the stone.
+- New option "Sharpening stones too" (on by default). Switch it off for poisons only. A hand set to Sharpening Stone still gets a stone and no poison.
+- A hand with the wrong poison family on it gets its own poison again. The tooltip names the one that is on.
 
 ## 0.3.0
 

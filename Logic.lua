@@ -13,8 +13,8 @@ Logic.POISON_FAMILIES = {
 	"Wound Poison",
 }
 
--- A hand can take a sharpening stone instead of a poison (one temporary enchant per weapon: the newest replaces
--- the other). The settings store this name as the hand's choice, next to the poison families.
+-- On Forever a weapon holds a poison and a sharpening stone at the same time. A hand set to this name takes no
+-- poison, only its stone; the settings store it as the hand's choice, next to the poison families.
 Logic.STONE = "Sharpening Stone"
 Logic.HAND_CHOICES = {}
 for i, family in ipairs(Logic.POISON_FAMILIES) do
@@ -39,6 +39,7 @@ Logic.DEFAULTS = {
 	offHandWeapon = "Sword of Omen",
 	mainHandPoison = "Instant Poison",
 	offHandPoison = "Crippling Poison",
+	stones = true, -- the best sharpening stone on both weapons, next to their poisons
 	castFishing = true, -- the fishing button casts Fishing once the pole and the lure are on
 	glowFishing = true, -- the fishing button glows when the pole is on without a lure
 	agility = true, -- the third button: agility food, then agility elixir
@@ -98,7 +99,7 @@ local STONE_BY_ID, STONE_BY_NAME = index(Logic.SHARPENING_STONES)
 
 -- Which hand choice a temporary weapon enchant belongs to, by SpellItemEnchantment id, from the Forever client's
 -- table (build 1.60.1.71037): each poison family's ranks, and the sharpening stones ("Sharpened +2" to "+8" and the
--- Elemental stone's "Critical +2%"). A hand set to one choice is not done while the other kind is on it.
+-- Elemental stone's "Critical +2%"). A hand set to one poison family is not done while another one is on it.
 Logic.ENCHANT_KIND = {}
 for kind, ids in pairs({
 	["Instant Poison"] = { 323, 324, 325, 623, 624, 625 },
@@ -118,22 +119,38 @@ for _, kind in pairs(Logic.ENCHANT_KIND) do
 	Logic.ENCHANT_KIND_CHOICE[kind] = true
 end
 
--- Whether a hand carries what it is set to. ids: the temporary enchant ids on it (nil when the game hides them).
--- Returns done (true / false / nil) and, when not done, the kind that is on it instead (nil for a bare weapon).
--- An enchant this table does not know (a new rank, an oil) counts as done: better quiet than a wrong nag.
-function Logic.handDone(ids, choice)
-	if ids == nil then
-		return nil
+-- Enum.ItemEnchantType: on Forever a weapon holds a stone (Temporary) and a poison (Imbue) at once, one of each.
+Logic.ENCHANT_TEMPORARY = 2
+Logic.ENCHANT_IMBUE = 3
+
+-- What a hand carries against what it is set to. enchants: { { id =, type = } } for its non-permanent enchants,
+-- nil when the game hides them. choice: the hand's poison family, or Logic.STONE for "stone only, no poison".
+-- wantStone: a stone goes on this hand too. Returns poisoned, on, stoned:
+--   poisoned: the chosen family is on (true when the hand takes no poison); on: the other family on it instead
+--   stoned: a sharpening stone is on (true when the hand takes none)
+-- An enchant the table does not know (a new rank, an oil) fills its slot: better quiet than a wrong nag.
+function Logic.handState(enchants, choice, wantStone)
+	if enchants == nil then
+		return nil, nil, nil
 	end
-	local other
-	for _, id in ipairs(ids) do
-		local kind = Logic.ENCHANT_KIND[id]
-		if kind == nil or kind == choice or Logic.ENCHANT_KIND_CHOICE[choice] == nil then
-			return true
+	local stoneOnly = choice == Logic.STONE
+	local poisoned = stoneOnly or Logic.ENCHANT_KIND_CHOICE[choice] == nil
+	local stoned = not (wantStone or stoneOnly)
+	local on
+	for _, e in ipairs(enchants) do
+		local kind = Logic.ENCHANT_KIND[e.id]
+		if kind == Logic.STONE or (kind == nil and e.type == Logic.ENCHANT_TEMPORARY) then
+			stoned = true
+		elseif kind == nil or kind == choice then
+			poisoned = true
+		else
+			on = on or kind
 		end
-		other = other or kind
 	end
-	return false, other
+	if poisoned then
+		on = nil
+	end
+	return poisoned, on, stoned
 end
 
 function Logic.stoneEntry(item)
@@ -265,10 +282,10 @@ function Logic.bestStone(items)
 	end)
 end
 
--- The best item in the bags for a hand's choice: a poison family's highest rank, or the best sharpening stone.
+-- The best poison in the bags for a hand's choice (nil for a stone-only hand: its stone comes from bestStone).
 function Logic.bestFor(items, choice)
 	if choice == Logic.STONE then
-		return Logic.bestStone(items)
+		return nil
 	end
 	return Logic.bestPoison(items, choice)
 end
@@ -405,8 +422,9 @@ end
 -- What the poison button does next.
 -- s.mhName, s.ohName: the equipped weapons' names; s.wantMH, s.wantOH: the configured ones ("" = don't care)
 -- s.haveMH, s.haveOH: the configured weapon is in the bags (or equipped)
--- s.mhPoisoned, s.ohPoisoned: the hand carries its chosen poison or stone: true / false, nil when unknown (secret)
--- s.mhOn, s.ohOn: when not, the other kind on it (a poison on a stone hand, a stone on a poison hand), or nil
+-- s.mhPoisoned, s.ohPoisoned: the hand carries its chosen poison: true / false, nil when unknown (secret)
+-- s.mhOn, s.ohOn: when not, the other poison family on it, or nil
+-- s.mhStoned, s.ohStoned: the hand carries the stone it wants (true when it wants none); s.stone: the best in the bags
 -- s.mhPoison, s.ohPoison: the best poison of each hand's family in the bags; s.mhFamily, s.ohFamily: their names
 function Logic.poisonStep(s)
 	if s.unknown then
@@ -442,46 +460,50 @@ function Logic.poisonStep(s)
 	if s.mhPoisoned == nil or s.ohPoisoned == nil then
 		return { label = "Poisons", reason = "poison state unknown (the game hides it here)" }
 	end
-	local glow = not s.mhPoisoned or not s.ohPoisoned
-	-- mhPoisoned / ohPoisoned mean "carries the poison or stone it is set to"; the newest temporary enchant replaces
-	-- the old one, so a hand with the other kind on it gets the same click
-	local function lacks(hand, family, on)
-		local want = family == Logic.STONE and "sharpening stone" or "poison"
-		if on then
-			return hand .. " has " .. (on == Logic.STONE and "a sharpening stone" or on) .. ", set to " .. want
-		end
-		return hand .. " has no " .. want
+	if s.mhStoned == nil or s.ohStoned == nil then
+		return { label = "Stones", reason = "stone state unknown (the game hides it here)" }
 	end
-	if not s.mhPoisoned and s.mhPoison then
-		return {
-			macro = useLine(s.mhPoison) .. "\n/use 16",
-			label = "Main hand: " .. s.mhPoison.name,
-			reason = lacks("main hand", s.mhFamily, s.mhOn),
-			glow = true,
-			icon = s.mhPoison,
-		}
+	-- A weapon holds one poison and one sharpening stone at once. Poisons first, main hand first; a hand with another
+	-- poison family on it gets the same click (the new poison replaces the old).
+	local function poisonReason(hand, on)
+		return on and (hand .. " has " .. on .. ", set to another poison") or (hand .. " has no poison")
 	end
-	if not s.ohPoisoned and s.ohPoison then
-		return {
-			macro = useLine(s.ohPoison) .. "\n/use 17",
-			label = "Off hand: " .. s.ohPoison.name,
-			reason = lacks("off hand", s.ohFamily, s.ohOn),
-			glow = true,
-			icon = s.ohPoison,
-		}
+	local function need(done, item, slot, hand, reason)
+		return { done = done, item = item, slot = slot, hand = hand, reason = reason }
 	end
-	if glow then
-		local want = {}
-		if not s.mhPoisoned then
-			want[#want + 1] = s.mhFamily or "main hand poison"
+	local needs = {
+		need(s.mhPoisoned, s.mhPoison, 16, "Main hand", poisonReason("main hand", s.mhOn)),
+		need(s.ohPoisoned, s.ohPoison, 17, "Off hand", poisonReason("off hand", s.ohOn)),
+		need(s.mhStoned, s.stone, 16, "Main hand", "main hand has no sharpening stone"),
+		need(s.ohStoned, s.stone, 17, "Off hand", "off hand has no sharpening stone"),
+	}
+	for _, n in ipairs(needs) do
+		if not n.done and n.item then
+			return {
+				macro = useLine(n.item) .. "\n/use " .. n.slot,
+				label = n.hand .. ": " .. n.item.name,
+				reason = n.reason,
+				glow = true,
+				icon = n.item,
+			}
 		end
-		if not s.ohPoisoned and s.ohFamily ~= s.mhFamily then
-			want[#want + 1] = s.ohFamily or "off hand poison"
-		end
+	end
+	local want = {}
+	if not s.mhPoisoned then
+		want[#want + 1] = s.mhFamily or "main hand poison"
+	end
+	if not s.ohPoisoned and s.ohFamily ~= s.mhFamily then
+		want[#want + 1] = s.ohFamily or "off hand poison"
+	end
+	local outOfStones = not s.mhStoned or not s.ohStoned
+	if outOfStones then
+		want[#want + 1] = "sharpening stones"
+	end
+	if #want > 0 then
 		local step =
 			{ label = "Out of poison", reason = "none in your bags: " .. table.concat(want, ", "), glow = true }
-		-- stones have a shopping list (TSM prices on mouseover); a hand that wants stones and has none names it
-		if (not s.mhPoisoned and s.mhFamily == Logic.STONE) or (not s.ohPoisoned and s.ohFamily == Logic.STONE) then
+		-- stones have a shopping list (TSM prices on mouseover)
+		if outOfStones then
 			step.buy = { "stone" }
 			if #want == 1 then
 				step.label = "Out of sharpening stones"
@@ -489,7 +511,7 @@ function Logic.poisonStep(s)
 		end
 		return step
 	end
-	return { label = "Poisoned", reason = "both weapons have their poison or stone on" }
+	return { label = "Poisoned", reason = "both weapons have their poison and stone on" }
 end
 
 local KIND_NAME = { food = "agility food", elixir = "agility elixir" }
