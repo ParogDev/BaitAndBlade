@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+The addon stops using consumables for you. It reminds you, and you click the item yourself.
+
+- Two buttons instead of three. The fishing button is unchanged. The weapons button only puts your weapons back, and it remembers the weapons you held before the pole, so "Use equipped" and `/bab weapons` are gone.
+- The weapons button no longer applies poisons or sharpening stones, and the agility button that ate and drank is removed.
+- Reminders for food, elixir, a poison per hand and a sharpening stone. On screen they are ForeverAuras auras. Install them with `/bab auras` or the button in the panel, then move and style them in `/fa`.
+- New picker, `/bab panel`. Per slot you choose the stat (or the poison) and see every tier with its bonus, required level, TradeSkillMaster price and how many you hold. The strongest tier for your level is recommended. Untick "worth it" on a tier that is too expensive and the recommendation moves down.
+- Food and elixirs are no longer agility only. Pick Agility, Strength, Attack Power, Spell Power, Healing, Mp5 or any other stat the game has food or elixirs for.
+- Shopping list. A slot with fewer than 5 in your bags asks for enough to hold 20, and both numbers can be changed in the picker. The list shows each price and the total, and each line has a Search button that looks the item up at the auction house through TradeSkillMaster. A small window with the list opens with the auction house.
+- ForeverAuras and TradeSkillMaster are optional. Without ForeverAuras the picker and `/bab` still show the reminders. Without TradeSkillMaster there are no prices.
+- Your 0.3 settings carry over: the poison per hand, the stones switch and the agility switch.
+
 ## 0.3.1
 
 - A weapon on Forever holds a poison and a sharpening stone at the same time, so the weapons button now puts both on each hand: poisons first, then your best stone. Before, a stone counted as the poison and a poison as the stone.
