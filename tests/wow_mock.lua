@@ -127,7 +127,18 @@ function M.install()
 			if not it then
 				return nil
 			end
-			return it.name, "|Hitem:" .. id .. "|h", 1, it.itemLevel or 10
+			return it.name,
+				"|Hitem:" .. id .. "|h[" .. it.name .. "]|h",
+				1,
+				it.itemLevel or 10,
+				1,
+				"",
+				"",
+				1,
+				it.equipLoc or "INVTYPE_WEAPON"
+		end,
+		RequestLoadItemDataByID = function(id)
+			M.requested[#M.requested + 1] = id
 		end,
 		GetItemInfoInstant = function(id)
 			local it = M.items[id]
@@ -202,6 +213,37 @@ function M.install()
 	_G.UnitLevel = function()
 		return M.level
 	end
+	M.class = "ROGUE" -- a class token, nil (not ready) or "secret"
+	_G.UnitClass = function()
+		if M.class == "secret" then
+			local v = {}
+			M.secret[v] = true
+			return v, v, 0
+		end
+		return M.class and "Rogue", M.class, 4
+	end
+	M.resting = false
+	_G.IsResting = function()
+		return M.resting
+	end
+	M.time = 1000
+	_G.GetTime = function()
+		return M.time
+	end
+	M.requested = {} -- item ids passed to C_Item.RequestLoadItemDataByID
+	M.scans = {} -- events passed to WeakAuras.ScanEvents
+	_G.WeakAuras = {
+		ScanEvents = function(event)
+			M.scans[#M.scans + 1] = event
+		end,
+	}
+	M.inserted = {} -- links passed to ChatEdit_InsertLink
+	M.insertTaken = true -- what ChatEdit_InsertLink returns (whether something took the link)
+	_G.ChatEdit_InsertLink = function(link)
+		M.inserted[#M.inserted + 1] = link
+		return M.insertTaken
+	end
+	_G.ChatFrameUtil = nil
 	_G.TSM_API = {
 		GetCustomPriceValue = function(_, itemString)
 			local id = tonumber(itemString:match("^i:(%d+)$"))
@@ -255,7 +297,8 @@ end
 
 function M.loadAddon(dir, saved)
 	local ns = {}
-	for _, f in ipairs({ "Logic.lua", "Options.lua", "Core.lua" }) do
+	-- Panel.lua and AuraPack.lua are frame code, checked in game; Core reaches them only through guarded calls
+	for _, f in ipairs({ "Logic.lua", "Data.lua", "Plan.lua", "Options.lua", "Core.lua" }) do
 		local chunk, err = loadfile(dir .. "/" .. f)
 		assert(chunk, err)
 		chunk("BaitAndBlade", ns)

@@ -1,25 +1,27 @@
--- Addon entry: two secure buttons (fishing, weapons and poisons), their glow, the client lookups behind them, the
--- selftest contract (docs/verify-loop.md in the scaffolding) and /bab. A click runs one step of a macro the addon
--- writes out of combat; nothing here acts without the player's click.
+-- Addon entry: two secure buttons (fishing, weapons), their glow, the client lookups behind them, the consumable
+-- state published for the ForeverAuras pack and the panel (ns.state, BAITANDBLADE_UPDATE), the selftest contract
+-- (docs/verify-loop.md in the scaffolding) and /bab. A click runs one step of a macro the addon writes out of
+-- combat; nothing here acts without the player's click.
 local ADDON, ns = ...
 
 BaitAndBlade = ns
 
 local Logic = ns.Logic
+local Plan = ns.Plan
 
-ns.VERSION = "0.3.1"
+ns.VERSION = "0.4.0"
 ns.FISHING_SPELL_ID = 7620
 ns.FISHING_ICON = 136245 -- Trade_Fishing
-ns.POISON_ICON = 132273 -- Ability_Poisons
-ns.AGILITY_ICON = "Interface\\Icons\\Spell_Misc_Food"
-ns.SHOP_ICON = "Interface\\Icons\\INV_Misc_Coin_01"
+ns.WEAPONS_ICON = 132273 -- Ability_Poisons
 ns.PRICE_SOURCE = "dbminbuyout" -- TSM: the cheapest buyout seen on the auction house
+ns.PRICE_TTL = 60 -- seconds a TSM price is reused before it is read again
 ns.BUTTON_SIZE = 36
+ns.UPDATE_EVENT = "BAITANDBLADE_UPDATE"
 
-local DB_VERSION = 1
+local DB_VERSION = 2
 local SLOT_MH, SLOT_OH = 16, 17
 
-local counters = { refreshes = 0, attributeSets = 0, deferredInCombat = 0, uncachedItems = 0 }
+local counters = { refreshes = 0, attributeSets = 0, deferredInCombat = 0, uncachedItems = 0, publishes = 0 }
 local selftest = { counters = counters }
 ns.counters = counters
 ns.selftest = selftest
@@ -42,6 +44,28 @@ local function guard(where, fn, ...)
 end
 ns.guard = guard
 
+-- The player's class token ("ROGUE"), or nil when the client does not give it yet or hides it.
+local function playerClass()
+	local ok, _, class = pcall(UnitClass, "player")
+	if ok and type(class) == "string" and not issecretvalue(class) then
+		return class
+	end
+	return nil
+end
+ns.playerClass = playerClass
+
+-- Fills the consumable slots from the 0.3 keys (idempotent). Without a class it waits for PLAYER_LOGIN unless
+-- forced: a fresh character's defaults depend on it.
+function ns.migrate(force)
+	local class = playerClass()
+	if not class and not force then
+		return false
+	end
+	Plan.migrate(ns.settings, class)
+	ns.db.dbVersion = DB_VERSION
+	return true
+end
+
 function ns.initDB(saved)
 	local db = type(saved) == "table" and saved or {}
 	db.dbVersion = db.dbVersion or DB_VERSION
@@ -55,6 +79,7 @@ function ns.initDB(saved)
 	ns.db = db
 	ns.settings = db.settings
 	BaitAndBladeDB = db
+	ns.migrate(false)
 	return db
 end
 
@@ -100,9 +125,10 @@ local function describe(itemID)
 end
 ns.describe = describe
 
--- Every distinct item in the bags, once per id, with count = the total of its stacks.
+-- Every distinct item in the bags whose info is loaded, once per id, with count = the total of its stacks; and
+-- counts: item id -> total for every item, loaded or not (the plan only needs ids).
 function ns.bagItems()
-	local items, seen = {}, {}
+	local items, seen, counts = {}, {}, {}
 	local last = NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4
 	for bag = 0, last do
 		for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
@@ -113,6 +139,7 @@ function ns.bagItems()
 				if type(stack) ~= "number" or issecretvalue(stack) then
 					stack = 1
 				end
+				counts[id] = (counts[id] or 0) + stack
 				if seen[id] then
 					seen[id].count = seen[id].count + stack
 				elseif seen[id] == nil then
@@ -126,7 +153,7 @@ function ns.bagItems()
 			end
 		end
 	end
-	return items
+	return items, counts
 end
 
 -- Whether the player has any of these buffs: true / false, nil plus the reason when the game hides auras (secret
@@ -165,12 +192,49 @@ function ns.price(itemID)
 	return value
 end
 
+-- ns.price, read at most once a minute per item (the refresh runs every few seconds).
+local priceCache = {}
+ns.priceCache = priceCache
+local function cachedPrice(itemID)
+	local t = GetTime()
+	local c = priceCache[itemID]
+	if c and t - c.at < ns.PRICE_TTL then
+		return c.value, c.why
+	end
+	local value, why = ns.price(itemID)
+	priceCache[itemID] = { value = value, why = why, at = t }
+	return value, why
+end
+
+-- Fills prices[id] for every tier of one slot's choice; the first reason a price is missing goes to selftest.
+local function fillPrices(prices, slot, choice)
+	for _, e in ipairs(Plan.entries(slot, choice)) do
+		local value, why = cachedPrice(e.id)
+		prices[e.id] = value
+		if not value and why and not selftest.priceWhy then
+			selftest.priceWhy = why
+		end
+	end
+end
+
 local function playerLevel()
 	local ok, level = pcall(UnitLevel, "player")
 	if ok and type(level) == "number" and not issecretvalue(level) then
 		return level
 	end
 	return 60
+end
+
+-- Whether the player is in a rested area (an inn, a city): false when hidden or missing.
+local function resting()
+	if type(IsResting) ~= "function" then
+		return false
+	end
+	local ok, r = pcall(IsResting)
+	if not ok or issecretvalue(r) then
+		return false
+	end
+	return r and true or false
 end
 
 -- The item in an equipment slot and the slot's state: "item", "empty", or "unknown" (an item is there but the
@@ -188,6 +252,14 @@ local function equipped(slot)
 		return nil, "unknown"
 	end
 	return item, "item"
+end
+
+local function twoHanded(itemID)
+	local equipLoc = select(9, C_Item.GetItemInfo(itemID))
+	if equipLoc == nil or issecretvalue(equipLoc) then
+		return false
+	end
+	return equipLoc == "INVTYPE_2HWEAPON"
 end
 
 -- The non-permanent enchants on a weapon slot as { id =, type = } (poison, stone, lure; {} for none), nil when the
@@ -237,13 +309,41 @@ local function fishingSpellName()
 	return "Fishing"
 end
 
--- The state both buttons decide from, gathered in one pass.
+-- Whether the player rides a flight path. A hidden or missing answer counts as "not flying": the buttons then work
+-- as before, and selftest.taxi says why.
+local function onTaxi()
+	if type(UnitOnTaxi) ~= "function" then
+		selftest.taxi = "UnitOnTaxi missing"
+		return false
+	end
+	local ok, flying = pcall(UnitOnTaxi, "player")
+	if not ok or issecretvalue(flying) then
+		selftest.taxi = ok and "secret" or ("UnitOnTaxi failed: " .. tostring(flying))
+		return false
+	end
+	selftest.taxi = flying and true or false
+	return selftest.taxi
+end
+ns.onTaxi = onTaxi
+
+-- The poison family a hand slot wants: nil when the slot is off or set to None (then whatever is on counts).
+local function handChoice(slots, slot)
+	local cfg = slots[slot]
+	if cfg and cfg.on and cfg.choice ~= Plan.NONE then
+		return cfg.choice
+	end
+	return nil
+end
+
+-- The state both buttons and the plan decide from, gathered in one pass.
+-- Returns fish (Logic.fishStep), weapons (Logic.weaponStep) and ctx (Plan.evaluate).
 function ns.gather()
 	local set = ns.settings
-	local items = ns.bagItems()
+	local slots = set.slots
+	local items, counts = ns.bagItems()
 	local mh, mhState = equipped(SLOT_MH)
 	local oh, ohState = equipped(SLOT_OH)
-	-- "not now" reasons: fishing only reads the main hand, the poison button both hands
+	-- "not now" reasons: fishing only reads the main hand, the weapons button both hands
 	local function why(state)
 		if state == "secret" then
 			return "not now: the game hides your equipped items here"
@@ -254,29 +354,47 @@ function ns.gather()
 	local fishUnknown = why(mhState)
 	local unknown = fishUnknown or why(ohState)
 	selftest.hands = { mainHand = mhState, offHand = ohState }
+
+	-- weapon memory: what the player wears, read out of combat with both hands known
+	if not unknown and not InCombatLockdown() then
+		local function hand(it)
+			return it and { name = it.name, pole = Logic.isPole(it), twoHand = twoHanded(it.id) } or nil
+		end
+		set.mainHandWeapon, set.offHandWeapon =
+			Logic.rememberWeapons(hand(mh), hand(oh), set.mainHandWeapon, set.offHandWeapon)
+	end
+
 	local mhSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.MainHand or 0
 	local ohSlot = Enum and Enum.WeaponSlot and Enum.WeaponSlot.OffHand or 1
 	selftest.enchants = {}
-	-- A hand with no weapon in it has nothing to poison: it counts as done (an equip step comes first when a
-	-- weapon is wanted there). Not `x and f() or false`: f() returning nil (hidden) must stay nil.
-	local mhEnchant, ohEnchant, mhStoned, ohStoned = true, true, true, true
-	-- mhAny: any non-permanent enchant on the main hand (a lure on the pole)
-	local mhOn, ohOn
+	local wantStone = slots.stone.on and true or false
+	-- One hand for the plan: weapon (holds a weapon that is not a fishing pole), poisoned, stoned. A hand the game
+	-- hides counts as a weapon with unknown enchants, so its reminders keep their last answer.
+	-- mhAny: any non-permanent enchant on the main hand (the lure on a pole), nil when hidden.
 	local mhAny = true
-	local wantStone = set.stones ~= false
-	if mh and mh.classID == Logic.WEAPON_CLASS then
-		local list = tempEnchant(mhSlot, "mainHand")
-		mhEnchant, mhOn, mhStoned = Logic.handState(list, set.mainHandPoison, wantStone)
-		if list == nil then
-			mhAny = nil
-		else
-			mhAny = #list > 0
+	local function planHand(it, state, weaponSlot, label, slot)
+		if state == "secret" or state == "unknown" then
+			return { weapon = true }
 		end
+		if not it or it.classID ~= Logic.WEAPON_CLASS then
+			return { weapon = false }
+		end
+		local list = tempEnchant(weaponSlot, label)
+		if slot == "mainHand" then
+			mhAny = list and #list > 0 -- nil (hidden) stays nil
+		end
+		if Logic.isPole(it) then
+			return { weapon = false }
+		end
+		local poisoned, _, stoned = Logic.handState(list, handChoice(slots, slot), wantStone)
+		return { weapon = true, poisoned = poisoned, stoned = stoned }
 	end
-	if oh and oh.classID == Logic.WEAPON_CLASS then
-		ohEnchant, ohOn, ohStoned = Logic.handState(tempEnchant(ohSlot, "offHand"), set.offHandPoison, wantStone)
-	end
-	-- a wanted weapon can be in the bags or already on either hand (swapped hands: /equipslot moves it)
+	local hands = {
+		mainHand = planHand(mh, mhState, mhSlot, "mainHand", "mainHand"),
+		offHand = planHand(oh, ohState, ohSlot, "offHand", "offHand"),
+	}
+
+	-- a remembered weapon can be in the bags or already on either hand (swapped hands: /equipslot moves it)
 	local function have(name)
 		if (mh and mh.name == name) or (oh and oh.name == name) then
 			return true
@@ -299,7 +417,7 @@ function ns.gather()
 		glowFishing = set.glowFishing,
 		fishingSpell = fishingSpellName(),
 	}
-	local poison = {
+	local weapons = {
 		unknown = unknown,
 		mhName = mh and mh.name,
 		ohName = oh and oh.name,
@@ -307,32 +425,226 @@ function ns.gather()
 		wantOH = set.offHandWeapon,
 		haveMH = have(set.mainHandWeapon),
 		haveOH = have(set.offHandWeapon),
-		mhPoisoned = mhEnchant,
-		ohPoisoned = ohEnchant,
-		mhOn = mhOn,
-		ohOn = ohOn,
-		mhStoned = mhStoned,
-		ohStoned = ohStoned,
-		stone = Logic.bestStone(items),
-		mhFamily = set.mainHandPoison,
-		ohFamily = set.offHandPoison,
-		mhPoison = Logic.bestFor(items, set.mainHandPoison),
-		ohPoison = Logic.bestFor(items, set.offHandPoison),
 	}
-	local fed, whyFed = hasBuff(Logic.FOOD_BUFFS)
-	local elixirUp, whyElixir = hasBuff(Logic.ELIXIR_BUFFS)
-	selftest.buffs = { fed = fed, elixir = elixirUp, why = whyFed or whyElixir }
-	local agility = {
-		unknown = whyFed or whyElixir,
-		fed = fed,
-		elixirUp = elixirUp,
-		food = Logic.bestFood(items),
-		elixir = Logic.bestElixir(items),
-		foodCount = Logic.countOf(items, Logic.foodEntry),
-		elixirCount = Logic.countOf(items, Logic.elixirEntry),
-		lowCount = tonumber(set.lowCount) or Logic.DEFAULTS.lowCount,
+
+	local class = playerClass()
+	selftest.priceWhy = nil
+	local prices = {}
+	for _, slot in ipairs(Plan.SLOTS) do
+		local cfg = slots[slot]
+		if cfg.on and cfg.choice ~= Plan.NONE and Plan.available(slot, class) then
+			fillPrices(prices, slot, cfg.choice)
+		end
+	end
+	local buffWhy
+	local ctx = {
+		level = playerLevel(),
+		class = class,
+		counts = counts,
+		prices = prices,
+		lowCount = set.lowCount,
+		stockTo = set.stockTo,
+		hands = hands,
+		buffUp = function(spellIDs)
+			local up, reason = hasBuff(spellIDs)
+			buffWhy = buffWhy or reason
+			return up
+		end,
 	}
-	return fish, poison, agility
+	ns.counts = counts
+	return fish, weapons, ctx, function()
+		return buffWhy
+	end
+end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Published state (ForeverAuras pack and the panel read ns.state on BAITANDBLADE_UPDATE)
+-- ---------------------------------------------------------------------------------------------------------
+local function money(copper)
+	if C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString then
+		local ok, text = pcall(C_CurrencyInfo.GetCoinTextureString, copper)
+		if ok and type(text) == "string" then
+			return text
+		end
+	end
+	return string.format("%dg %02ds %02dc", copper / 10000, (copper / 100) % 100, copper % 100)
+end
+ns.money = money
+
+local function iconOf(id)
+	if id and C_Item.GetItemIconByID then
+		local ok, tex = pcall(C_Item.GetItemIconByID, id)
+		if ok and tex and not issecretvalue(tex) then
+			return tex
+		end
+	end
+	return nil
+end
+
+-- One reminder as the auras read it.
+local function public(r)
+	return {
+		show = r.show and true or false,
+		kind = r.kind,
+		text = r.text,
+		name = r.name,
+		id = r.id,
+		icon = iconOf(r.id),
+		count = r.count,
+	}
+end
+
+-- Turns Plan.evaluate's answer into ns.state. A reminder the game hides (unknown) keeps the last published one
+-- for its slot, shown only while not flying.
+function ns.buildState(plan, flying)
+	local before = ns.state and ns.state.reminders or {}
+	local reminders = {}
+	for _, slot in ipairs(Plan.SLOTS) do
+		local r = plan.reminders[slot]
+		local prev = before[slot]
+		if r.unknown and prev then
+			local kept = {}
+			for k, v in pairs(prev) do
+				kept[k] = v
+			end
+			kept.show = prev.show and not flying
+			reminders[slot] = kept
+		else
+			reminders[slot] = public(r)
+		end
+	end
+	local lines, total = {}, nil
+	for _, b in ipairs(plan.shopping) do
+		local price = b.price and (money(b.price) .. " each") or "no price"
+		lines[#lines + 1] = b.need .. "x " .. b.name .. "  " .. price
+		if b.price then
+			total = (total or 0) + b.price * b.need
+		end
+	end
+	local shop = {
+		show = #plan.shopping > 0 and not flying and (resting() or ns.atAuctionHouse == true),
+		text = table.concat(lines, "\n"),
+		total = total,
+	}
+	ns.state = { reminders = reminders, shopping = plan.shopping, shop = shop }
+	return ns.state
+end
+
+-- A cheap string that changes when anything the auras show changes.
+local function signature(state)
+	local parts = {}
+	for _, slot in ipairs(Plan.SLOTS) do
+		local r = state.reminders[slot] or {}
+		parts[#parts + 1] = table.concat({
+			slot,
+			tostring(r.show),
+			tostring(r.kind),
+			tostring(r.text),
+			tostring(r.id),
+			tostring(r.count),
+		}, ",")
+	end
+	parts[#parts + 1] = tostring(state.shop.show) .. "," .. state.shop.text .. "," .. tostring(state.shop.total)
+	return table.concat(parts, ";")
+end
+
+-- Tells the auras and the panel when the state changed. Returns whether it did.
+function ns.publish()
+	if not ns.state then
+		return false
+	end
+	local sig = signature(ns.state)
+	if sig == ns.publishedSignature then
+		return false
+	end
+	ns.publishedSignature = sig
+	counters.publishes = counters.publishes + 1
+	local wa = type(WeakAuras) == "table" and WeakAuras or nil
+	selftest.auras = wa ~= nil and type(wa.ScanEvents) == "function"
+	if selftest.auras then
+		guard("auras", wa.ScanEvents, ns.UPDATE_EVENT)
+	end
+	if ns.Panel and type(ns.Panel.update) == "function" then
+		guard("panel", ns.Panel.update)
+	end
+	return true
+end
+
+-- ---------------------------------------------------------------------------------------------------------
+-- API for the panel
+-- ---------------------------------------------------------------------------------------------------------
+
+-- The ladder of one slot's current choice with prices and counts: rows, recommended, held, total (Plan.ladder).
+function ns.ladder(slot)
+	local cfg = ns.settings.slots[slot]
+	if not cfg then
+		return {}, nil, nil, 0
+	end
+	local prices = {}
+	fillPrices(prices, slot, cfg.choice)
+	local counts = ns.counts or select(2, ns.bagItems())
+	return Plan.ladder(slot, cfg, { level = playerLevel(), prices = prices, counts = counts })
+end
+
+-- Changes one slot setting (key "on" or "choice"). Returns false plus why for an unknown slot or key.
+function ns.setSlot(slot, key, value)
+	local cfg = ns.settings.slots[slot]
+	if not cfg then
+		return false, "no slot " .. tostring(slot)
+	end
+	if key ~= "on" and key ~= "choice" then
+		return false, "slot setting must be on or choice, not " .. tostring(key)
+	end
+	cfg[key] = value
+	ns.queueRefresh()
+	return true
+end
+
+-- Rules a tier in or out (skipped false un-skips a school-limited elixir that starts out skipped).
+function ns.setSkip(slot, itemID, skipped)
+	local cfg = ns.settings.slots[slot]
+	if not cfg then
+		return false, "no slot " .. tostring(slot)
+	end
+	cfg.skip[itemID] = skipped and true or false
+	ns.queueRefresh()
+	return true
+end
+
+-- Puts an item's link where the chat box would take it: TradeSkillMaster hooks this to search the auction house.
+-- Returns true, or false plus why (link not loaded yet, nothing took it).
+function ns.search(itemID)
+	-- atAuction: a search that nothing took away from the auction house is expected, at it a broken link to TSM
+	local result = { id = itemID, handled = false, at = now(), atAuction = ns.atAuctionHouse and true or false }
+	selftest.search = result
+	local _, link = C_Item.GetItemInfo(itemID)
+	if link == nil or issecretvalue(link) or type(link) ~= "string" then
+		if C_Item.RequestLoadItemDataByID then
+			pcall(C_Item.RequestLoadItemDataByID, itemID)
+		end
+		result.why = "item link not loaded yet: try again in a moment"
+		return false, result.why
+	end
+	-- ChatEdit_InsertLink is the name TSM hooks; Mainline keeps it only as a deprecation fallback of this one
+	local insert = ChatEdit_InsertLink
+	if type(insert) ~= "function" then
+		insert = ChatFrameUtil and ChatFrameUtil.InsertLink
+	end
+	if type(insert) ~= "function" then
+		result.why = "ChatEdit_InsertLink and ChatFrameUtil.InsertLink missing"
+		return false, result.why
+	end
+	local ok, handled = pcall(insert, link)
+	if not ok then
+		result.why = "InsertLink failed: " .. tostring(handled)
+		return false, result.why
+	end
+	result.handled = handled and true or false
+	if not result.handled then
+		result.why = "nothing took the link: open the auction house (TSM searches it) or a chat box"
+		return false, result.why
+	end
+	return true
 end
 
 -- ---------------------------------------------------------------------------------------------------------
@@ -368,55 +680,6 @@ local function setGlow(button, on)
 end
 ns.setGlow = setGlow
 
-local function money(copper)
-	if C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString then
-		local ok, text = pcall(C_CurrencyInfo.GetCoinTextureString, copper)
-		if ok and type(text) == "string" then
-			return text
-		end
-	end
-	return string.format("%dg %02ds %02dc", copper / 10000, (copper / 100) % 100, copper % 100)
-end
-
--- The buy section of the agility tooltip: per missing kind, the strongest you can use with TSM's price, and the
--- cheapest of the strongest tier on the auction house. Prices are read here, on mouseover only.
-local function addShopping(buy)
-	local level = playerLevel()
-	local tsm = { source = ns.PRICE_SOURCE }
-	for _, kind in ipairs(buy) do
-		local prices = {}
-		local shop = Logic.SHOP_KINDS[kind]
-		for _, e in ipairs(shop.list) do
-			local p, why = ns.price(e.id)
-			prices[e.id] = p
-			tsm.why = tsm.why or (not p and why or nil)
-		end
-		local rows, cheapest = Logic.shoppingList(kind, level, prices, 4)
-		GameTooltip:AddLine(" ")
-		GameTooltip:AddLine(shop.header, 1, 0.82, 0)
-		for _, r in ipairs(rows) do
-			GameTooltip:AddDoubleLine(
-				r.name .. " (" .. r.bonus .. ")",
-				r.price and money(r.price) or "none seen",
-				1,
-				1,
-				1,
-				0.8,
-				0.8,
-				0.8
-			)
-		end
-		if cheapest then
-			GameTooltip:AddLine("Cheapest: " .. cheapest.name .. " at " .. money(cheapest.price), 0.4, 1, 0.4)
-		end
-		tsm[kind] = cheapest and { id = cheapest.id, price = cheapest.price } or false
-	end
-	if tsm.why then
-		GameTooltip:AddLine("Prices: " .. tsm.why, 1, 0.4, 0.4, true)
-	end
-	selftest.tsm = tsm
-end
-
 local function showTooltip(button)
 	local step = button.step
 	if not step then
@@ -427,8 +690,11 @@ local function showTooltip(button)
 	GameTooltip:SetText(button.title)
 	GameTooltip:AddLine(step.label, 1, 1, 1)
 	GameTooltip:AddLine(step.reason, 0.7, 0.7, 0.7, true)
-	if step.buy then
-		addShopping(step.buy)
+	if button == ns.weaponsButton then
+		local s = ns.settings
+		local mhName = s.mainHandWeapon ~= "" and s.mainHandWeapon or "none"
+		local ohName = s.offHandWeapon ~= "" and s.offHandWeapon or "none"
+		GameTooltip:AddLine("Remembered: " .. mhName .. " / " .. ohName, 0.5, 0.8, 1, true)
 	end
 	if not step.macro then
 		GameTooltip:AddLine("Click does nothing right now.", 1, 0.4, 0.4)
@@ -498,7 +764,7 @@ function ns.createUI()
 		return ns.frame
 	end
 	local f = CreateFrame("Frame", "BaitAndBladeFrame", UIParent)
-	f:SetSize(ns.BUTTON_SIZE * 3 + 12, ns.BUTTON_SIZE)
+	f:SetSize(ns.BUTTON_SIZE * 2 + 6, ns.BUTTON_SIZE)
 	f:SetMovable(true)
 	f:SetClampedToScreen(true)
 	local pos = ns.db.position
@@ -510,10 +776,9 @@ function ns.createUI()
 	ns.frame = f
 	ns.fishButton = makeButton("BaitAndBladeFishButton", f, "Fishing", ns.FISHING_ICON)
 	ns.fishButton:SetPoint("LEFT", f, "LEFT", 0, 0)
-	ns.poisonButton = makeButton("BaitAndBladePoisonButton", f, "Weapons and poisons", ns.POISON_ICON)
-	ns.poisonButton:SetPoint("LEFT", ns.fishButton, "RIGHT", 6, 0)
-	ns.agilityButton = makeButton("BaitAndBladeAgilityButton", f, "Agility food and elixir", ns.AGILITY_ICON)
-	ns.agilityButton:SetPoint("LEFT", ns.poisonButton, "RIGHT", 6, 0)
+	-- the 0.3 frame name: players have it bound and in macros
+	ns.weaponsButton = makeButton("BaitAndBladePoisonButton", f, "Weapons", ns.WEAPONS_ICON)
+	ns.weaponsButton:SetPoint("LEFT", ns.fishButton, "RIGHT", 6, 0)
 	if ns.settings.shown then
 		f:Show()
 	else
@@ -523,11 +788,8 @@ function ns.createUI()
 end
 
 local function iconFor(step, button)
-	if step.shop then
-		return ns.SHOP_ICON
-	end
 	if step.icon and step.icon.id then
-		local tex = C_Item.GetItemIconByID and C_Item.GetItemIconByID(step.icon.id)
+		local tex = iconOf(step.icon.id)
 		if tex then
 			return tex
 		end
@@ -538,7 +800,7 @@ end
 local function apply(button, step)
 	button.step = step
 	button.icon:SetTexture(iconFor(step, button))
-	button.icon:SetDesaturated(step.macro == nil and not step.shop)
+	button.icon:SetDesaturated(step.macro == nil)
 	setGlow(button, step.glow)
 	-- alpha, not Hide: a secure button can't be hidden in combat, and the mouse must still find it
 	if not (GameTooltip:IsOwned(button) and GameTooltip:IsShown()) then
@@ -556,75 +818,35 @@ local function apply(button, step)
 	end
 end
 
--- Whether the player rides a flight path. A hidden or missing answer counts as "not flying": the buttons then work
--- as before, and selftest.taxi says why.
-local function onTaxi()
-	if type(UnitOnTaxi) ~= "function" then
-		selftest.taxi = "UnitOnTaxi missing"
-		return false
-	end
-	local ok, flying = pcall(UnitOnTaxi, "player")
-	if not ok or issecretvalue(flying) then
-		selftest.taxi = ok and "secret" or ("UnitOnTaxi failed: " .. tostring(flying))
-		return false
-	end
-	selftest.taxi = flying and true or false
-	return selftest.taxi
+local function stepSummary(step)
+	return { label = step.label, reason = step.reason, macro = step.macro, glow = step.glow }
 end
-ns.onTaxi = onTaxi
 
 function ns.refresh()
 	if not ns.frame then
 		return
 	end
+	if type(ns.settings.slots) ~= "table" then
+		ns.migrate(true)
+	end
 	counters.refreshes = counters.refreshes + 1
-	local fish, poison, agility = ns.gather()
-	local fishStep, poisonStep = Logic.fishStep(fish), Logic.poisonStep(poison)
+	local fish, weapons, ctx, buffWhy = ns.gather()
+	local fishStep, weaponStep = Logic.fishStep(fish), Logic.weaponStep(weapons)
 	ns.flying = onTaxi()
 	if ns.flying then
-		fishStep, poisonStep = Logic.onTaxi(fishStep), Logic.onTaxi(poisonStep)
+		fishStep, weaponStep = Logic.onTaxi(fishStep), Logic.onTaxi(weaponStep)
 	end
 	apply(ns.fishButton, fishStep)
-	apply(ns.poisonButton, poisonStep)
-	selftest.fish = { label = fishStep.label, reason = fishStep.reason, macro = fishStep.macro, glow = fishStep.glow }
-	selftest.poison =
-		{ label = poisonStep.label, reason = poisonStep.reason, macro = poisonStep.macro, glow = poisonStep.glow }
-	ns.refreshAgility(agility)
-end
+	apply(ns.weaponsButton, weaponStep)
+	selftest.fish = stepSummary(fishStep)
+	selftest.weapons = stepSummary(weaponStep)
 
--- The agility button: shown when the setting is on (out of combat only: a secure frame), and in combat it keeps
--- the step it had, since buffs read as secrets there and the macro is locked anyway.
-function ns.refreshAgility(agility)
-	local b = ns.agilityButton
-	if not InCombatLockdown() then
-		if ns.settings.agility then
-			b:Show()
-		else
-			b:Hide()
-		end
-	end
-	if not ns.settings.agility then
-		selftest.agility = { off = true }
-		return
-	end
-	if InCombatLockdown() and b.step then
-		return
-	end
-	local step = Logic.agilityStep(agility)
-	if ns.flying then
-		step = Logic.onTaxi(step)
-	end
-	apply(b, step)
-	selftest.agility = {
-		label = step.label,
-		reason = step.reason,
-		macro = step.macro,
-		glow = step.glow,
-		hidden = step.hidden,
-		buy = step.buy,
-		foodCount = agility.foodCount,
-		elixirCount = agility.elixirCount,
-	}
+	ctx.flying = ns.flying
+	local plan = Plan.evaluate(ns.settings, ctx)
+	selftest.buffs = buffWhy()
+	ns.plan = plan
+	ns.buildState(plan, ns.flying)
+	ns.publish()
 end
 
 -- One refresh per frame burst: bag and equipment events arrive in clusters.
@@ -644,6 +866,15 @@ end
 -- ---------------------------------------------------------------------------------------------------------
 function selftest.snapshot(phase)
 	local okB, buildVersion, buildNumber, _, interface = pcall(GetBuildInfo)
+	local reminders, shopping = {}, {}
+	if ns.state then
+		for slot, r in pairs(ns.state.reminders) do
+			reminders[slot] = r.show and r.text or false
+		end
+		for i, b in ipairs(ns.state.shopping) do
+			shopping[i] = { id = b.id, need = b.need, price = b.price }
+		end
+	end
 	ns.db.selftest = {
 		phase = phase,
 		version = version(),
@@ -655,11 +886,16 @@ function selftest.snapshot(phase)
 		settings = ns.settings,
 		options = selftest.options,
 		fish = selftest.fish,
-		poison = selftest.poison,
-		agility = selftest.agility,
+		weapons = selftest.weapons,
+		reminders = reminders,
+		shopping = shopping,
+		search = selftest.search,
+		auras = selftest.auras,
+		panel = selftest.panel, -- set by Panel.lua: built, rows, error
+		auraPack = selftest.auraPack, -- set by AuraPack.lua: the last import asked of ForeverAuras
 		buffs = selftest.buffs,
+		prices = selftest.priceWhy,
 		taxi = selftest.taxi,
-		tsm = selftest.tsm,
 		enchants = selftest.enchants,
 		hands = selftest.hands,
 		keys = selftest.keys,
@@ -676,8 +912,6 @@ BINDING_HEADER_BAITANDBLADE = "BaitAndBlade"
 for _, k in ipairs(Logic.KEYS) do
 	_G["BINDING_NAME_" .. k.command] = k.label
 end
--- listed under Keybindings with no default key: the default keys were set once per character already
-_G["BINDING_NAME_CLICK BaitAndBladeAgilityButton:LeftButton"] = "Agility food and elixir button"
 
 -- The character's id for the once-per-character key flag (bindings can be per character). A GUID, not a name.
 local function characterKey()
@@ -742,25 +976,6 @@ end
 -- ---------------------------------------------------------------------------------------------------------
 -- /bab
 -- ---------------------------------------------------------------------------------------------------------
--- Stores the weapons in the main and off hand as the ones the poison button equips.
-function ns.rememberWeapons()
-	local mh, mhState = equipped(SLOT_MH)
-	local oh, ohState = equipped(SLOT_OH)
-	if mhState == "unknown" or ohState == "unknown" or mhState == "secret" or ohState == "secret" then
-		say("can't read your weapons right now (loading, or hidden here): try again in a moment.")
-		return false
-	end
-	if not mh or Logic.isPole(mh) then
-		say("equip your normal weapons first (main hand is " .. (mh and mh.name or "empty") .. ").")
-		return false
-	end
-	ns.settings.mainHandWeapon = mh.name
-	ns.settings.offHandWeapon = oh and oh.name or ""
-	say("weapons set: " .. mh.name .. " / " .. (oh and oh.name or "no off hand") .. ".")
-	ns.queueRefresh()
-	return true
-end
-
 function ns.setShown(shown)
 	ns.settings.shown = shown
 	if InCombatLockdown() then
@@ -782,8 +997,6 @@ function ns.slash(msg)
 	elseif cmd == "lock" or cmd == "unlock" then
 		ns.settings.locked = cmd == "lock"
 		say(ns.settings.locked and "buttons locked." or "buttons unlocked: shift-drag to move.")
-	elseif cmd == "weapons" then
-		ns.rememberWeapons()
 	elseif cmd == "reset" then
 		if InCombatLockdown() then
 			say("in combat: try /bab reset after combat.")
@@ -798,20 +1011,41 @@ function ns.slash(msg)
 		else
 			say("no options panel: " .. tostring(selftest.options and selftest.options.error))
 		end
+	elseif cmd == "panel" then
+		if ns.Panel and type(ns.Panel.toggle) == "function" then
+			ns.Panel.toggle()
+		else
+			say("the consumables panel is missing (Panel.lua did not load).")
+		end
+	elseif cmd == "auras" then
+		if ns.AuraPack and type(ns.AuraPack.install) == "function" then
+			ns.AuraPack.install()
+		else
+			say("the aura pack is missing (AuraPack.lua did not load).")
+		end
 	else
 		ns.refresh()
 		local s = ns.settings
-		local line = "weapons %s / %s, poisons %s / %s."
-		say(line:format(s.mainHandWeapon, s.offHandWeapon, s.mainHandPoison, s.offHandPoison))
+		local mhName = s.mainHandWeapon ~= "" and s.mainHandWeapon or "none"
+		local ohName = s.offHandWeapon ~= "" and s.offHandWeapon or "none"
+		say("weapons remembered: " .. mhName .. " / " .. ohName .. ".")
 		if selftest.fish then
 			say("fishing: " .. selftest.fish.label .. " (" .. selftest.fish.reason .. ")")
-			say("poisons: " .. selftest.poison.label .. " (" .. selftest.poison.reason .. ")")
+			say("weapons: " .. selftest.weapons.label .. " (" .. selftest.weapons.reason .. ")")
 		end
-		if selftest.agility and selftest.agility.label then
-			say("agility: " .. selftest.agility.label .. " (" .. selftest.agility.reason .. ")")
+		if ns.state then
+			for _, slot in ipairs(Plan.SLOTS) do
+				local r = ns.state.reminders[slot]
+				if r and r.show and r.text then
+					say("reminder: " .. r.text)
+				end
+			end
+			for line in ns.state.shop.text:gmatch("[^\n]+") do
+				say("buy: " .. line)
+			end
 		end
-		say("/bab show | hide | lock | unlock | weapons (remember equipped) | reset | options")
-		say("macros: /click BaitAndBladeFishButton, BaitAndBladePoisonButton, BaitAndBladeAgilityButton")
+		say("/bab show | hide | lock | unlock | reset | options | panel | auras")
+		say("macros: /click BaitAndBladeFishButton, BaitAndBladePoisonButton")
 	end
 end
 
@@ -845,6 +1079,9 @@ for _, e in ipairs({
 	"SKILL_LINES_CHANGED",
 	"PLAYER_CONTROL_LOST", -- taking off on a flight path
 	"PLAYER_CONTROL_GAINED", -- landing
+	"PLAYER_UPDATE_RESTING", -- the shopping list shows in rested areas
+	"AUCTION_HOUSE_SHOW", -- and at the auction house
+	"AUCTION_HOUSE_CLOSED",
 }) do
 	events:RegisterEvent(e)
 end
@@ -855,6 +1092,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		end
 	elseif event == "PLAYER_LOGIN" then
 		selftest.loadedAt = now()
+		guard("migrate", ns.migrate, true)
 		guard("createUI", ns.createUI)
 		if ns.Options then
 			guard("options", ns.Options.register)
@@ -883,14 +1121,18 @@ events:SetScript("OnEvent", function(_, event, arg1)
 			ns.waitingForItems = false
 			ns.queueRefresh()
 		end
+	elseif event == "AUCTION_HOUSE_SHOW" or event == "AUCTION_HOUSE_CLOSED" then
+		ns.atAuctionHouse = event == "AUCTION_HOUSE_SHOW"
+		ns.queueRefresh()
 	else
 		ns.queueRefresh()
 	end
 end)
 
--- Poisons and lures run out on a timer the client does not always announce: look again every few seconds.
+-- Poisons, lures and buffs run out on a timer the client does not always announce: look again every few seconds
+-- (also while the buttons are hidden: the reminders come from the same refresh).
 C_Timer.NewTicker(5, function()
-	if ns.frame and ns.frame:IsShown() then
+	if ns.frame then
 		guard("refresh", ns.refresh)
 	end
 end)

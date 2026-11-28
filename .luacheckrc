@@ -13,12 +13,12 @@ local client = {
 	"CreateFrame", "C_AddOns", "C_Item", "C_Container", "C_Spell", "C_Timer", "GetBuildInfo", "GetInventoryItemID",
 	"InCombatLockdown", "IsShiftKeyDown", "WOW_PROJECT_ID", "issecretvalue", "date", "strtrim", "Enum",
 	"GetBindingAction", "GetBindingKey", "SetBinding", "SaveBindings", "GetCurrentBindingSet", "UnitGUID",
-	"C_UnitAuras", "C_CurrencyInfo", "UnitLevel", "UnitOnTaxi",
+	"C_UnitAuras", "C_CurrencyInfo", "UnitLevel", "UnitOnTaxi", "UnitClass", "IsResting", "GetTime",
 }
--- FrameXML globals the generated list may not carry.
+-- FrameXML globals the generated list may not carry, and other addons' (TSM, ForeverAuras as WeakAuras).
 local framexml = {
 	"DEFAULT_CHAT_FRAME", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "NUM_BAG_SLOTS", "UIParent", "GameTooltip", "Settings",
-	"CreateSettingsButtonInitializer", "TSM_API",
+	"CreateSettingsButtonInitializer", "TSM_API", "ChatEdit_InsertLink", "ChatFrameUtil", "WeakAuras",
 }
 
 local ok, wow = pcall(dofile, "../../tools/luacheck-wow-globals.lua")
@@ -52,4 +52,6 @@ for _, g in ipairs(framexml) do
 	testGlobals[#testGlobals + 1] = g
 end
 files["tests/"] = { std = "+busted", globals = testGlobals }
+-- generated (tools/baitandblade/gen_consumables.py in the scaffolding): one item per line, however long
+files["Data.lua"] = { max_line_length = false }
 exclude_files = { ".luacheckrc", ".release/" }
