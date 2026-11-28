@@ -614,7 +614,8 @@ end
 -- Puts an item's link where the chat box would take it: TradeSkillMaster hooks this to search the auction house.
 -- Returns true, or false plus why (link not loaded yet, nothing took it).
 function ns.search(itemID)
-	local result = { id = itemID, handled = false, at = now() }
+	-- atAuction: a search that nothing took away from the auction house is expected, at it a broken link to TSM
+	local result = { id = itemID, handled = false, at = now(), atAuction = ns.atAuctionHouse and true or false }
 	selftest.search = result
 	local _, link = C_Item.GetItemInfo(itemID)
 	if link == nil or issecretvalue(link) or type(link) ~= "string" then
