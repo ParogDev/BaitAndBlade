@@ -10,4 +10,5 @@ ignore:
   - .github
   - .luacheckrc
   - .stylua.toml
+  - .styluaignore
   - .busted
