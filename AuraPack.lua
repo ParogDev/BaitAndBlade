@@ -1,9 +1,9 @@
 -- The reminder auras for ForeverAuras, as an import string. /bab auras and the panel button hand it to ForeverAuras,
 -- which opens its own import window: the player confirms there, nothing is installed without that click.
--- STRING is generated: do not edit it by hand. Its source is auras/baitandblade/baitandblade.lua in the author's
--- workspace, built with `python tools/foreverauras/fa.py encode`. To change an aura, change it in ForeverAuras,
--- export the group and replace the string. The auras only read BaitAndBlade.state and listen for the
--- BAITANDBLADE_UPDATE event that Core fires.
+-- STRING is a ForeverAuras export: do not edit it by hand. It holds the group "BaitAndBlade" with one icon per
+-- slot (food, elixir, main hand, off hand, stone) and a "To buy" text. To change an aura, change it in
+-- ForeverAuras, export the group and replace the string. The auras only read BaitAndBlade.state and listen for
+-- the BAITANDBLADE_UPDATE event that Core fires.
 -- luacheck: no max line length
 -- luacheck: read globals WeakAuras
 local _, ns = ...

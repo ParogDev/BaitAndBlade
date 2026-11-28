@@ -891,6 +891,8 @@ function selftest.snapshot(phase)
 		shopping = shopping,
 		search = selftest.search,
 		auras = selftest.auras,
+		panel = selftest.panel, -- set by Panel.lua: built, rows, error
+		auraPack = selftest.auraPack, -- set by AuraPack.lua: the last import asked of ForeverAuras
 		buffs = selftest.buffs,
 		prices = selftest.priceWhy,
 		taxi = selftest.taxi,
