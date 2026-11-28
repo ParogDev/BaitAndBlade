@@ -10,37 +10,15 @@ local function item(id, name, extra)
 	return t
 end
 
-describe("Logic.poisonRank", function()
-	it("reads roman ranks and the bare name as rank 1", function()
-		assert.equal(6, Logic.poisonRank("Instant Poison VI", "Instant Poison"))
-		assert.equal(1, Logic.poisonRank("Crippling Poison", "Crippling Poison"))
-		assert.equal(2, Logic.poisonRank("Crippling Poison II", "Crippling Poison"))
-	end)
-
-	it("rejects other families and look-alikes", function()
-		assert.is_nil(Logic.poisonRank("Deadly Poison V", "Instant Poison"))
-		assert.is_nil(Logic.poisonRank("Instant Poisoner", "Instant Poison"))
-		assert.is_nil(Logic.poisonRank("Instant Poison Vial", "Instant Poison"))
-		assert.is_nil(Logic.poisonRank(nil, "Instant Poison"))
-	end)
-end)
-
 describe("Logic.best*", function()
-	it("picks the highest poison rank the player can use", function()
-		local items = {
-			item(1, "Instant Poison III"),
-			item(2, "Instant Poison VI", { usable = false }),
-			item(3, "Instant Poison V"),
-			item(4, "Crippling Poison II"),
-		}
-		assert.equal(3, Logic.bestPoison(items, "Instant Poison").id)
-		assert.equal(4, Logic.bestPoison(items, "Crippling Poison").id)
-		assert.is_nil(Logic.bestPoison(items, "Wound Poison"))
-	end)
-
 	it("picks the strongest lure, by id or by name", function()
 		local items = { item(6529, "Shiny Bauble"), item(99999, "Bright Baubles"), item(5, "Linen Cloth") }
 		assert.equal(99999, Logic.bestLure(items).id)
+	end)
+
+	it("skips a lure the player can't use", function()
+		local items = { item(6529, "Shiny Bauble"), item(6533, "Aquadynamic Fish Attractor", { usable = false }) }
+		assert.equal(6529, Logic.bestLure(items).id)
 	end)
 
 	it("picks the best fishing pole and ignores other weapons", function()
@@ -88,7 +66,7 @@ describe("Logic.fishStep", function()
 	end)
 end)
 
-describe("Logic.poisonStep", function()
+describe("Logic.weaponStep", function()
 	local base
 	before_each(function()
 		base = {
@@ -98,104 +76,90 @@ describe("Logic.poisonStep", function()
 			wantOH = "Sword of Omen",
 			haveMH = true,
 			haveOH = true,
-			mhPoisoned = true,
-			ohPoisoned = true,
-			mhStoned = true,
-			ohStoned = true,
-			mhFamily = "Instant Poison",
-			ohFamily = "Crippling Poison",
-			mhPoison = item(8928, "Instant Poison VI"),
-			ohPoison = item(3776, "Crippling Poison II"),
 		}
 	end)
 
-	it("equips both weapons in one click when the pole is in hand", function()
+	it("equips both weapons in one click when the pole is in hand, glowing", function()
 		base.mhName, base.ohName = "Fishing Pole", nil
-		local s = Logic.poisonStep(base)
+		local s = Logic.weaponStep(base)
 		assert.equal("/equipslot 16 Dazzling Longsword\n/equipslot 17 Sword of Omen", s.macro)
-		assert.is_falsy(s.glow)
-	end)
-
-	it("poisons the main hand first and glows", function()
-		base.mhPoisoned, base.ohPoisoned = false, false
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Instant Poison VI\n/use 16", s.macro)
+		assert.equal("Equip weapons", s.label)
 		assert.is_true(s.glow)
 	end)
 
-	it("then the off hand", function()
-		base.ohPoisoned = false
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Crippling Poison II\n/use 17", s.macro)
-		assert.is_true(s.glow)
-	end)
-
-	it("skips to the off hand when the main hand poison is out", function()
-		base.mhPoisoned, base.ohPoisoned, base.mhPoison = false, false, nil
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Crippling Poison II\n/use 17", s.macro)
-	end)
-
-	it("glows with no macro when the bags hold no poison", function()
-		base.mhPoisoned, base.mhPoison = false, nil
-		local s = Logic.poisonStep(base)
-		assert.is_nil(s.macro)
-		assert.is_true(s.glow)
-		assert.matches("Instant Poison", s.reason)
-	end)
-
-	it("rests when both hands are poisoned", function()
-		local s = Logic.poisonStep(base)
+	it("rests with no macro and no glow when the weapons are on", function()
+		local s = Logic.weaponStep(base)
+		assert.equal("Weapons on", s.label)
 		assert.is_nil(s.macro)
 		assert.is_falsy(s.glow)
 	end)
 
-	it("names a configured weapon that is nowhere", function()
-		base.ohName, base.haveOH = nil, false
-		local s = Logic.poisonStep(base)
+	it("says so when no weapon is remembered", function()
+		base.wantMH, base.wantOH = "", ""
+		local s = Logic.weaponStep(base)
+		assert.equal("No weapons remembered", s.label)
 		assert.is_nil(s.macro)
+		assert.is_string(s.reason)
+	end)
+
+	it("names a remembered weapon that is nowhere, and equips the other", function()
+		base.mhName, base.ohName, base.haveOH = "Fishing Pole", nil, false
+		local s = Logic.weaponStep(base)
+		assert.equal("/equipslot 16 Dazzling Longsword", s.macro)
 		assert.matches("Sword of Omen", s.reason)
-	end)
-
-	local P, S = Logic.ENCHANT_IMBUE, Logic.ENCHANT_TEMPORARY
-	local dense = item(12404, "Dense Sharpening Stone")
-
-	it("stones a poisoned hand that has no stone", function()
-		base.stone, base.ohStoned = dense, false
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Dense Sharpening Stone\n/use 17", s.macro)
-		assert.equal("off hand has no sharpening stone", s.reason)
-		assert.is_true(s.glow)
-	end)
-
-	it("poisons a stoned hand that has no poison, before any stone", function()
-		base.stone, base.mhStoned = dense, false
-		base.ohPoisoned = false
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Crippling Poison II\n/use 17", s.macro)
-		base.ohPoisoned = true
-		s = Logic.poisonStep(base)
-		assert.equal("/use Dense Sharpening Stone\n/use 16", s.macro)
-	end)
-
-	it("re-poisons a hand with another poison family on it", function()
-		base.mhPoisoned, base.mhOn = Logic.handState({ { id = 22, type = P } }, "Instant Poison", true)
-		local s = Logic.poisonStep(base)
-		assert.equal("/use Instant Poison VI\n/use 16", s.macro)
-		assert.equal("main hand has Crippling Poison, set to another poison", s.reason)
-	end)
-
-	it("asks to buy stones when a hand lacks one and the bags have none", function()
-		base.ohStoned, base.stone = false, nil
-		local s = Logic.poisonStep(base)
+		base.mhName = "Dazzling Longsword"
+		s = Logic.weaponStep(base)
+		assert.equal("Weapons missing", s.label)
 		assert.is_nil(s.macro)
-		assert.equal("Out of sharpening stones", s.label)
-		assert.same({ "stone" }, s.buy)
-		base.mhPoisoned, base.mhPoison = false, nil
-		s = Logic.poisonStep(base)
-		assert.equal("Out of poison", s.label)
-		assert.same({ "stone" }, s.buy)
 	end)
+
+	it("puts back a two-hander with no off hand remembered", function()
+		base.mhName, base.ohName, base.wantMH, base.wantOH = "Fishing Pole", nil, "Big Axe", ""
+		local s = Logic.weaponStep(base)
+		assert.equal("/equipslot 16 Big Axe", s.macro)
+	end)
+
+	it("waits while the equipped items are unknown", function()
+		base.unknown = "not now: the game hides your equipped items here"
+		local s = Logic.weaponStep(base)
+		assert.equal("Waiting", s.label)
+		assert.is_nil(s.macro)
+		assert.matches("hides", s.reason)
+	end)
+end)
+
+describe("Logic.rememberWeapons", function()
+	local sword = { name = "Dazzling Longsword" }
+	local omen = { name = "Sword of Omen" }
+	local axe = { name = "Big Axe", twoHand = true }
+	local pole = { name = "Fishing Pole", pole = true, twoHand = true }
+
+	it("keeps both names while the main hand is empty or a pole", function()
+		assert.same({ "A", "B" }, { Logic.rememberWeapons(nil, nil, "A", "B") })
+		assert.same({ "A", "B" }, { Logic.rememberWeapons(pole, nil, "A", "B") })
+		assert.same({ "", "" }, { Logic.rememberWeapons(pole, nil, nil, nil) })
+	end)
+
+	it("remembers both hands when both hold something", function()
+		assert.same({ "Dazzling Longsword", "Sword of Omen" }, { Logic.rememberWeapons(sword, omen, "A", "B") })
+	end)
+
+	it("forgets the off hand for a two-hander", function()
+		assert.same({ "Big Axe", "" }, { Logic.rememberWeapons(axe, nil, "A", "B") })
+	end)
+
+	it("keeps the off hand when a one-hander comes back first", function()
+		assert.same({ "Dazzling Longsword", "Sword of Omen" }, {
+			Logic.rememberWeapons(sword, nil, "Dazzling Longsword", "Sword of Omen"),
+		})
+		assert.same({ "New Blade", "Sword of Omen" }, {
+			Logic.rememberWeapons({ name = "New Blade" }, nil, "Dazzling Longsword", "Sword of Omen"),
+		})
+	end)
+end)
+
+describe("Logic.handState", function()
+	local P, S = Logic.ENCHANT_IMBUE, Logic.ENCHANT_TEMPORARY
 
 	it("reads a poison and a stone on one weapon (the reading from the game)", function()
 		local both = { { id = 1643, type = S }, { id = 325, type = P } }
@@ -205,8 +169,15 @@ describe("Logic.poisonStep", function()
 		assert.same({ true, nil, false }, { Logic.handState({ both[2] }, "Instant Poison", true) })
 	end)
 
-	it("stone-only hands want no poison, and stones off want no stone", function()
+	it("names another poison family on the hand", function()
+		assert.same({ false, "Crippling Poison", true }, {
+			Logic.handState({ { id = 22, type = P } }, "Instant Poison", false),
+		})
+	end)
+
+	it("stone-only and no-poison hands want no poison, and stones off want no stone", function()
 		assert.same({ true, nil, false }, { Logic.handState({ { id = 22, type = P } }, Logic.STONE, false) })
+		assert.same({ true, nil, false }, { Logic.handState({}, nil, true) })
 		assert.same({ false, nil, true }, { Logic.handState({}, "Instant Poison", false) })
 		assert.same({ true, nil, true }, { Logic.handState({ { id = 2506, type = S } }, Logic.STONE, true) })
 		assert.is_nil(Logic.handState(nil, "Instant Poison", true))
@@ -216,127 +187,29 @@ describe("Logic.poisonStep", function()
 		local odd = { { id = 99999, type = S }, { id = 99998, type = P } }
 		assert.same({ true, nil, true }, { Logic.handState(odd, "Wound Poison", true) })
 	end)
-
-	it("does not glow when the poison state is hidden", function()
-		base.mhPoisoned = nil
-		local s = Logic.poisonStep(base)
-		assert.is_falsy(s.glow)
-		assert.is_nil(s.macro)
-	end)
 end)
 
-describe("Logic agility", function()
-	local stew = { id = 12212, name = "Jungle Stew", count = 3 }
-	local poivre = { id = 250069, name = "Flank au Poivre", count = 1 }
-	local greater = { id = 9187, name = "Elixir of Greater Agility", count = 2 }
-	local mongoose = { id = 13452, name = "Elixir of the Mongoose", count = 1 }
-
-	it("picks the strongest food and elixir, skipping ones the player can't use", function()
-		assert.equal(250069, Logic.bestFood({ stew, poivre }).id)
-		local tooHigh = { id = 250069, name = "Flank au Poivre", usable = false }
-		assert.equal(12212, Logic.bestFood({ stew, tooHigh }).id)
-		assert.equal(13452, Logic.bestElixir({ greater, mongoose }).id)
-		-- a Forever copy under another id matches by name
-		assert.equal(777, Logic.bestFood({ { id = 777, name = "Jungle Stew" } }).id)
-		assert.equal(4, Logic.countOf({ stew, poivre, greater }, Logic.foodEntry))
+describe("Logic.keyPlan", function()
+	it("sets a free key, keeps the player's choices", function()
+		assert.equal("set", Logic.keyPlan("", "CMD", false))
+		assert.equal("ours", Logic.keyPlan("CMD", "CMD", true))
+		assert.equal("kept", Logic.keyPlan("", "CMD", true))
+		assert.equal("taken", Logic.keyPlan("OTHER", "CMD", false))
 	end)
 
-	local function state(over)
-		local s = { fed = false, elixirUp = false, foodCount = 0, elixirCount = 0, lowCount = 5 }
-		for k, v in pairs(over) do
-			s[k] = v
-		end
-		return s
-	end
-
-	it("eats first, then drinks, glowing", function()
-		local s = Logic.agilityStep(state({ food = stew, elixir = greater }))
-		assert.equal("/use Jungle Stew", s.macro)
-		assert.is_true(s.glow)
-		s = Logic.agilityStep(state({ fed = true, food = stew, elixir = greater }))
-		assert.equal("/use Elixir of Greater Agility", s.macro)
-	end)
-
-	it("drinks while naming the missing food as a buy", function()
-		local s = Logic.agilityStep(state({ elixir = greater }))
-		assert.equal("/use Elixir of Greater Agility", s.macro)
-		assert.same({ "food" }, s.buy)
-	end)
-
-	it("turns into a buy reminder with nothing to use", function()
-		local s = Logic.agilityStep(state({ fed = true }))
-		assert.is_nil(s.macro)
-		assert.is_true(s.shop)
-		assert.same({ "elixir" }, s.buy)
-		assert.equal("Buy agility elixir", s.label)
-	end)
-
-	it("hides when buffed and stocked, reminds when low", function()
-		local s = Logic.agilityStep(state({ fed = true, elixirUp = true, foodCount = 5, elixirCount = 7 }))
-		assert.is_true(s.hidden)
-		assert.is_nil(s.macro)
-		s = Logic.agilityStep(state({ fed = true, elixirUp = true, foodCount = 2, elixirCount = 7 }))
-		assert.is_falsy(s.hidden)
-		assert.same({ "food" }, s.buy)
-		assert.is_true(s.shop)
-	end)
-
-	it("waits when the buffs are hidden", function()
-		local s = Logic.agilityStep(state({ unknown = "not now: hidden", fed = nil }))
-		assert.equal("Waiting", s.label)
-		assert.is_nil(s.macro)
-	end)
-
-	it("lists what to buy, strongest usable first, cheapest of the best priced tier", function()
-		local prices = { [250069] = 9000, [250072] = 7000, [12212] = 100 }
-		local rows, cheapest = Logic.shoppingList("food", 50, prices, 4)
-		assert.equal(4, #rows)
-		assert.equal(20, rows[1].agi) -- Filet o' Flank (level 55) left out at level 50
-		assert.equal(250072, cheapest.id)
-		rows, cheapest = Logic.shoppingList("food", 40, prices)
-		assert.equal(15, rows[1].agi)
-		assert.equal(12212, cheapest.id)
-		local _, none = Logic.shoppingList("elixir", 60, {})
-		assert.is_nil(none)
-	end)
-end)
-
-describe("Logic sharpening stones", function()
-	it("picks the strongest stone, by id or by Forever copy's name, Elemental over Dense", function()
-		local dense = item(12404, "Dense Sharpening Stone")
-		local copy = item(287980, "Elemental Sharpening Stone")
-		local solid = item(7964, "Solid Sharpening Stone")
-		assert.equal(dense, Logic.bestStone({ solid, dense }))
-		assert.equal(copy, Logic.bestStone({ solid, dense, copy }))
-		assert.is_nil(Logic.bestStone({ item(23122, "Consecrated Sharpening Stone") }))
-		-- a stone-only hand takes no poison: its stone comes from bestStone
-		assert.is_nil(Logic.bestFor({ dense }, Logic.STONE))
-		assert.is_nil(Logic.bestFor({ solid }, "Instant Poison"))
-	end)
-
-	it("lists stones to buy by level, with their bonus text", function()
-		local rows, cheapest = Logic.shoppingList("stone", 40, { [12404] = 300, [7964] = 100 }, 4)
-		assert.equal("Dense Sharpening Stone", rows[1].name)
-		assert.equal("+8 damage", rows[1].bonus)
-		assert.equal(12404, cheapest.id)
-	end)
-
-	it("offers stones next to the poison families", function()
-		assert.equal(Logic.STONE, Logic.HAND_CHOICES[#Logic.HAND_CHOICES])
-		assert.equal(#Logic.POISON_FAMILIES + 1, #Logic.HAND_CHOICES)
+	it("labels the weapons button by what it does now, on the frame name players bound", function()
+		assert.equal("CLICK BaitAndBladePoisonButton:LeftButton", Logic.KEYS[2].command)
+		assert.equal("Weapons button", Logic.KEYS[2].label)
 	end)
 end)
 
 describe("Logic.onTaxi", function()
-	it("drops the macro, glow and buy reminder and hides a buy step", function()
-		local s = Logic.onTaxi({ macro = "/use x", label = "Eat x", reason = "r", glow = true })
+	it("drops the macro and glow and names the step for after landing", function()
+		local s = Logic.onTaxi({ macro = "/use x", label = "Equip weapons", reason = "r", glow = true })
 		assert.is_nil(s.macro)
 		assert.is_nil(s.glow)
 		assert.is_nil(s.hidden)
-		assert.matches("Eat x", s.reason)
-		s = Logic.onTaxi({ label = "Buy agility food", reason = "r", buy = { "food" }, shop = true })
-		assert.is_nil(s.buy)
-		assert.is_nil(s.shop)
-		assert.is_true(s.hidden)
+		assert.is_true(s.taxi)
+		assert.matches("Equip weapons", s.reason)
 	end)
 end)

@@ -1,5 +1,6 @@
--- The panel under Options > AddOns > BaitAndBlade: which poison goes on which hand, the fishing button's behaviour,
--- and the weapons the poison button equips (taken from what is in your hands, since the Settings API has no text box).
+-- The panel under Options > AddOns > BaitAndBlade: the fishing button's behaviour, the lock, and the way into the
+-- consumables panel (food, elixirs, poisons and stones to remind about, and what to buy). The weapons button needs
+-- no setting: it remembers the weapons you wear.
 local _, ns = ...
 
 local Logic = ns.Logic
@@ -7,14 +8,6 @@ local Logic = ns.Logic
 local Options = {}
 ns.Options = Options
 Options.TITLE = "BaitAndBlade"
-
-local function poisonChoices()
-	local c = Settings.CreateControlTextContainer()
-	for _, choice in ipairs(Logic.HAND_CHOICES) do
-		c:Add(choice, choice)
-	end
-	return c:GetData()
-end
 
 function Options.register()
 	if Options.category then
@@ -47,42 +40,25 @@ function Options.register()
 		return s
 	end
 
-	Settings.CreateDropdown(
-		category,
-		addon("mainHandPoison", "String", "Main hand poison"),
-		poisonChoices,
-		"The poison the button puts on the main hand: the highest rank in your bags that you can use. "
-			.. "Sharpening Stone means no poison on this hand, only a stone."
-	)
-	Settings.CreateDropdown(
-		category,
-		addon("offHandPoison", "String", "Off hand poison"),
-		poisonChoices,
-		"The poison the button puts on the off hand: the highest rank in your bags that you can use. "
-			.. "Sharpening Stone means no poison on this hand, only a stone."
-	)
-	Settings.CreateCheckbox(
-		category,
-		addon("stones", "Boolean", "Sharpening stones too"),
-		"Also put your best sharpening stone on both weapons. A weapon holds a poison and a stone at the same time."
-	)
-
 	if layout and CreateSettingsButtonInitializer then
-		local function weaponsLine()
-			return "Weapons: " .. (set.mainHandWeapon or "?") .. " / " .. (set.offHandWeapon or "?")
-		end
 		layout:AddInitializer(
 			CreateSettingsButtonInitializer(
-				weaponsLine(),
-				"Use equipped",
+				"Consumables and reminders",
+				"Open",
 				function()
-					ns.rememberWeapons()
+					if ns.Panel and type(ns.Panel.toggle) == "function" then
+						ns.Panel.toggle()
+					else
+						ns.say("the consumables panel is missing (Panel.lua did not load).")
+					end
 				end,
-				"Stores the weapons now in your main and off hand as the ones the poison button equips. "
-					.. "Same as /bab weapons. The new names show here after a /reload.",
+				"Pick the food, elixir, poisons and sharpening stone to be reminded about, and see what to buy. "
+					.. "Same as /bab panel.",
 				true
 			)
 		)
+	else
+		st.panelButton = "CreateSettingsButtonInitializer missing: use /bab panel"
 	end
 
 	Settings.CreateCheckbox(
@@ -94,12 +70,6 @@ function Options.register()
 		category,
 		addon("glowFishing", "Boolean", "Glow when the lure is missing"),
 		"The fishing button glows while the pole is on without a lure and one is in your bags."
-	)
-	Settings.CreateCheckbox(
-		category,
-		addon("agility", "Boolean", "Agility food and elixir button"),
-		"A third button eats your strongest agility food, then drinks your strongest agility elixir. With none in "
-			.. "your bags it shows what to buy and its TSM price; buffed and stocked, it shows only under the mouse."
 	)
 	local locked = addon("locked", "Boolean", "Lock the buttons")
 	Settings.CreateCheckbox(category, locked, "Unlocked, shift-drag a button to move both.")
